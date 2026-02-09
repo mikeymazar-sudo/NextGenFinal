@@ -4,7 +4,6 @@
  */
 
 export {
-  resend,
   sendEmail,
   sendEmailFrom,
   sendBulkEmails,
