@@ -6,7 +6,9 @@ import { checkRateLimit } from '@/lib/rate-limit'
 import { apiSuccess, Errors } from '@/lib/api-response'
 import { createAdminClient } from '@/lib/supabase/server'
 
-const resend = new Resend(process.env.RESEND_API_KEY)
+function getResendClient() {
+  return new Resend(process.env.RESEND_API_KEY)
+}
 
 const SendEmailSchema = z.object({
   to: z.string().email(),
@@ -110,7 +112,7 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
 
     const domain = process.env.RESEND_DOMAIN || 'nextgenrealty.com'
 
-    const { error: sendError } = await resend.emails.send({
+    const { error: sendError } = await getResendClient().emails.send({
       from: `${senderName} <noreply@${domain}>`,
       to,
       subject: emailSubject,

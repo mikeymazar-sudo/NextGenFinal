@@ -1,7 +1,13 @@
 import { Resend } from 'resend'
 
-// Initialize Resend client
-export const resend = new Resend(process.env.RESEND_API_KEY)
+// Lazy-initialize Resend client to avoid build-time errors
+let _resend: Resend | null = null
+function getResendClient(): Resend {
+  if (!_resend) {
+    _resend = new Resend(process.env.RESEND_API_KEY)
+  }
+  return _resend
+}
 
 // Email configuration
 export const EMAIL_CONFIG = {
@@ -31,7 +37,7 @@ export interface SendEmailOptions {
  */
 export async function sendEmail(options: SendEmailOptions) {
   try {
-    const { data, error } = await resend.emails.send({
+    const { data, error } = await getResendClient().emails.send({
       from: options.from || EMAIL_CONFIG.from.default,
       to: options.to,
       subject: options.subject,

@@ -1,15 +1,22 @@
 import twilio from 'twilio';
 import { createServerClient as createClient } from '@/lib/supabase/server';
 
-const accountSid = process.env.TWILIO_ACCOUNT_SID;
-const authToken = process.env.TWILIO_AUTH_TOKEN;
-const phoneNumber = process.env.TWILIO_PHONE_NUMBER;
-
-if (!accountSid || !authToken || !phoneNumber) {
-  throw new Error('Missing Twilio credentials in environment variables');
+function getTwilioClient() {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  if (!accountSid || !authToken) {
+    throw new Error('Missing Twilio credentials in environment variables');
+  }
+  return twilio(accountSid, authToken);
 }
 
-const client = twilio(accountSid, authToken);
+function getTwilioPhoneNumber() {
+  const phoneNumber = process.env.TWILIO_PHONE_NUMBER;
+  if (!phoneNumber) {
+    throw new Error('Missing TWILIO_PHONE_NUMBER environment variable');
+  }
+  return phoneNumber;
+}
 
 export interface SendSMSParams {
   to: string;
@@ -31,6 +38,7 @@ export interface SMSResult {
  */
 export async function sendSMS(params: SendSMSParams): Promise<SMSResult> {
   const { to, body, contactId, propertyId, mediaUrls } = params;
+  const phoneNumber = getTwilioPhoneNumber();
 
   try {
     // Validate phone number format
@@ -39,7 +47,7 @@ export async function sendSMS(params: SendSMSParams): Promise<SMSResult> {
     }
 
     // Send SMS via Twilio
-    const message = await client.messages.create({
+    const message = await getTwilioClient().messages.create({
       body,
       from: phoneNumber,
       to,

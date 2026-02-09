@@ -10,7 +10,9 @@ const AnalyzeSchema = z.object({
   propertyId: z.string().uuid(),
 })
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+function getOpenAIClient() {
+  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+}
 
 export const POST = withAuth(async (req: NextRequest, { user }) => {
   try {
@@ -84,7 +86,7 @@ Provide a JSON analysis with these exact fields:
 
 Be conservative. Only respond with valid JSON, no markdown.`
 
-    const completion = await openai.chat.completions.create({
+    const completion = await getOpenAIClient().chat.completions.create({
       model: 'gpt-4o',
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.3,
