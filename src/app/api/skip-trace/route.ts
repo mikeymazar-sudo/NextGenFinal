@@ -47,7 +47,7 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
       }
     }
 
-    // Get property data to use any existing owner info from Attom/imports
+    // Get property data to use any existing owner info from imports
     const { data: property } = await supabase
       .from('properties')
       .select('owner_name, city, state, zip')

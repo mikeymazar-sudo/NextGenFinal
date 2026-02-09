@@ -45,45 +45,52 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
       return apiSuccess(existing, true)
     }
 
-    // Call Attom API
-    const fullAddress = [address, city, state, zip].filter(Boolean).join(', ')
-    const attomUrl = `https://api.gateway.attomdata.com/propertyapi/v1.0.0/property/basicprofile?address=${encodeURIComponent(fullAddress)}`
+    // Call RealEstateAPI PropertyDetail
+    const reApiUrl = 'https://api.realestateapi.com/v2/PropertyDetail'
 
-    const attomRes = await fetch(attomUrl, {
+    const reApiRes = await fetch(reApiUrl, {
+      method: 'POST',
       headers: {
         'Accept': 'application/json',
-        'apikey': process.env.ATTOM_API_KEY!,
+        'Content-Type': 'application/json',
+        'x-api-key': process.env.REAPI_SECRET_KEY!,
       },
+      body: JSON.stringify({
+        address: address,
+        city: city || undefined,
+        state: state || undefined,
+        zip: zip || undefined,
+      }),
     })
 
-    if (!attomRes.ok) {
-      const errBody = await attomRes.text()
-      console.error('Attom API error:', attomRes.status, errBody)
-      return Errors.externalApi('Attom Data', { status: attomRes.status })
+    if (!reApiRes.ok) {
+      const errBody = await reApiRes.text()
+      console.error('RealEstateAPI error:', reApiRes.status, errBody)
+      return Errors.externalApi('RealEstateAPI', { status: reApiRes.status })
     }
 
-    const attomData = await attomRes.json()
-    const prop = attomData?.property?.[0]
+    const reApiData = await reApiRes.json()
+    const prop = reApiData?.data?.[0] || reApiData?.data
 
     if (!prop) {
       return Errors.notFound('Property')
     }
 
-    // Normalize Attom data
+    // Normalize RealEstateAPI data
     const normalized = {
-      address: prop.address?.oneLine || address,
-      city: prop.address?.locality || city || null,
-      state: prop.address?.countrySubd || state || null,
-      zip: prop.address?.postal1 || zip || null,
-      list_price: prop.sale?.amount?.saleAmt || prop.assessment?.assessed?.assdTtlValue || null,
-      bedrooms: prop.building?.rooms?.beds || null,
-      bathrooms: prop.building?.rooms?.bathsFull || null,
-      sqft: prop.building?.size?.livingSize || prop.building?.size?.universalSize || null,
-      year_built: prop.summary?.yearBuilt || null,
-      lot_size: prop.lot?.lotSize2 || prop.lot?.lotSize1 || null,
-      property_type: prop.summary?.propType || prop.summary?.propSubType || null,
-      owner_name: prop.owner?.owner1?.fullName || null,
-      raw_attom_data: attomData,
+      address: prop.address?.address || prop.address?.oneLine || address,
+      city: prop.address?.city || city || null,
+      state: prop.address?.state || state || null,
+      zip: prop.address?.zip || prop.address?.zipCode || zip || null,
+      list_price: prop.saleInfo?.salePrice || prop.taxInfo?.assessedValue || null,
+      bedrooms: prop.buildingInfo?.bedrooms || null,
+      bathrooms: prop.buildingInfo?.bathrooms || null,
+      sqft: prop.buildingInfo?.livingSquareFeet || prop.buildingInfo?.totalSquareFeet || null,
+      year_built: prop.buildingInfo?.yearBuilt || null,
+      lot_size: prop.lotInfo?.lotSquareFeet || prop.lotInfo?.lotAcres || null,
+      property_type: prop.propertyType || prop.buildingInfo?.propertyType || null,
+      owner_name: prop.ownerInfo?.owner1FullName || prop.ownerInfo?.ownerName || null,
+      raw_attom_data: reApiData,
       created_by: user.id,
       status: 'new' as const,
     }
@@ -106,3 +113,4 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
     return Errors.internal()
   }
 })
+
