@@ -160,7 +160,7 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
             if (rows.length > 0) {
                 const { data, error } = await supabase
                     .from('properties')
-                    .insert(rows)
+                    .upsert(rows, { onConflict: 'address,city,state,zip' })
                     .select('id');
 
                 if (error) {
