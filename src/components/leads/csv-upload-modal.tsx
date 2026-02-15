@@ -231,14 +231,23 @@ function autoDetectMapping(csvCol: string, alreadyMapped: Set<string>): string {
 /**
  * Build initial column mappings by auto-detecting each CSV column.
  * Ensures no two CSV columns map to the same target field.
+ * Skips mapping if the sample data (first row) is empty for that column.
  */
-function buildInitialMappings(csvColumns: string[]): Record<string, string> {
+function buildInitialMappings(csvColumns: string[], firstRow?: RawRow): Record<string, string> {
     const mappings: Record<string, string> = {}
     const usedTargets = new Set<string>()
 
     // First pass: high-confidence matches
     const scores: { col: string; target: string; score: number }[] = []
     for (const col of csvColumns) {
+        // If sample data is empty, don't auto-map
+        if (firstRow) {
+            const sampleVal = firstRow[col]
+            if (!sampleVal || sampleVal.trim() === '') {
+                continue
+            }
+        }
+
         const normalized = col.toLowerCase().trim().replace(/[\s\-]+/g, '_')
         for (const field of TARGET_FIELDS) {
             const keywords = FIELD_KEYWORDS[field.key]
@@ -336,7 +345,7 @@ export function CsvUploadModal({ onImportComplete }: CsvUploadModalProps) {
                     })
 
                     setCsvColumns(cols)
-                    setColumnMappings(buildInitialMappings(cols))
+                    setColumnMappings(buildInitialMappings(cols, rows[0]))
                 }
             },
             error: (error) => {
