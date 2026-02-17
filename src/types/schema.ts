@@ -217,6 +217,7 @@ export type PowerDialerMode =
   | 'SKIP_TRACING'
   | 'DISPOSITION'
   | 'PAUSED'
+  | 'PAUSED_AWAITING_CONTINUE'
   | 'COMPLETED'
 
 export interface PowerDialerLead {

@@ -44,6 +44,7 @@ interface PowerDialerControlsProps {
   onResume: () => void
   onStop: () => void
   onSkip: () => void
+  onContinue: () => void
 }
 
 function formatDuration(s: number) {
@@ -71,6 +72,7 @@ export function PowerDialerControls({
   onResume,
   onStop,
   onSkip,
+  onContinue,
 }: PowerDialerControlsProps) {
   const progressPercent = totalLeads > 0 ? ((currentIndex) / totalLeads) * 100 : 0
 
@@ -203,6 +205,11 @@ export function PowerDialerControls({
             Paused
           </Badge>
         )}
+        {mode === 'PAUSED_AWAITING_CONTINUE' && (
+          <Badge variant="outline" className="text-[10px] border-blue-300 text-blue-600">
+            Review lead — press Continue when ready
+          </Badge>
+        )}
         {mode === 'READY' && (
           <>
             <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
@@ -262,8 +269,20 @@ export function PowerDialerControls({
           </Button>
         )}
 
+        {/* Continue Dialing (after answered call) */}
+        {mode === 'PAUSED_AWAITING_CONTINUE' && (
+          <Button
+            size="sm"
+            className="h-8 gap-1 text-xs bg-green-600 hover:bg-green-700 text-white"
+            onClick={onContinue}
+          >
+            <Play className="h-3 w-3" />
+            Continue Dialing
+          </Button>
+        )}
+
         {/* Pause / Resume */}
-        {mode !== 'LOADING_QUEUE' && mode !== 'DISPOSITION' && (
+        {mode !== 'LOADING_QUEUE' && mode !== 'DISPOSITION' && mode !== 'PAUSED_AWAITING_CONTINUE' && (
           mode === 'PAUSED' ? (
             <Button
               variant="outline"

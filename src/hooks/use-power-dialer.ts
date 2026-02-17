@@ -93,6 +93,7 @@ interface PowerDialerState {
   showTemplateEditor: boolean
   currentPhone: string | null
   stats: PowerDialerSessionStats
+  callWasAnswered: boolean
 }
 
 type PowerDialerAction =
@@ -114,7 +115,10 @@ type PowerDialerAction =
   | { type: 'CALL_ENDED_UNANSWERED' }
   | { type: 'REDIALING' }
   | { type: 'DISPOSITION' }
+  | { type: 'RECORD_DISPOSITION'; disposition: string }
   | { type: 'DISPOSITION_COMPLETE'; disposition: string }
+  | { type: 'AUTO_ADVANCE_NO_ANSWER' }
+  | { type: 'PAUSE_AWAITING_CONTINUE' }
   | { type: 'SKIP_LEAD' }
   | { type: 'ADVANCE' }
   | { type: 'PAUSE' }
@@ -145,6 +149,7 @@ const initialState: PowerDialerState = {
   showTemplateEditor: false,
   currentPhone: null,
   stats: { total: 0, called: 0, noAnswer: 0, interested: 0, notInterested: 0, skipped: 0 },
+  callWasAnswered: false,
 }
 
 function reducer(state: PowerDialerState, action: PowerDialerAction): PowerDialerState {
@@ -171,6 +176,7 @@ function reducer(state: PowerDialerState, action: PowerDialerAction): PowerDiale
         queue: action.queue,
         currentIndex: 0,
         dialAttempt: 1,
+        callWasAnswered: false,
         stats: computeStats(action.queue),
       }
 
@@ -215,25 +221,42 @@ function reducer(state: PowerDialerState, action: PowerDialerAction): PowerDiale
       return { ...state, mode: 'DIALING', currentPhone: action.phone }
 
     case 'CALL_LIVE':
-      return { ...state, mode: 'IN_CALL' }
+      return { ...state, mode: 'IN_CALL', callWasAnswered: true }
 
     case 'CALL_ENDED_UNANSWERED':
-      // If double dial enabled and this was attempt 1, prepare for redial
-      if (state.settings.doubleDial && state.dialAttempt === 1) {
-        return { ...state, mode: 'REDIALING', dialAttempt: 2 }
-      }
-      // Otherwise mark as no answer and go to disposition
-      return { ...state, mode: 'DISPOSITION' }
+      // Sets REDIALING mode — the effect will initiate the actual redial
+      return { ...state, mode: 'REDIALING', dialAttempt: 2, callWasAnswered: false }
 
     case 'REDIALING':
       return { ...state, mode: 'REDIALING' }
 
     case 'DISPOSITION': {
+      // Only reached for answered calls; mark as 'called' until disposition is recorded
       const q = [...state.queue]
       if (q[state.currentIndex]) {
-        q[state.currentIndex] = { ...q[state.currentIndex], dialStatus: 'no_answer' }
+        q[state.currentIndex] = { ...q[state.currentIndex], dialStatus: 'called' }
       }
       return { ...state, mode: 'DISPOSITION', queue: q, stats: computeStats(q) }
+    }
+
+    case 'RECORD_DISPOSITION': {
+      // Records disposition for the current lead without advancing or changing mode
+      const q = [...state.queue]
+      const lead = q[state.currentIndex]
+      if (lead) {
+        const statusMap: Record<string, PowerDialerLead['dialStatus']> = {
+          'Interested': 'interested',
+          'Not Interested': 'not_interested',
+          'No Answer': 'no_answer',
+          'Left Voicemail': 'no_answer',
+          'Wrong Number': 'skipped',
+        }
+        q[state.currentIndex] = {
+          ...lead,
+          dialStatus: statusMap[action.disposition] || 'called',
+        }
+      }
+      return { ...state, queue: q, stats: computeStats(q) }
     }
 
     case 'DISPOSITION_COMPLETE': {
@@ -255,6 +278,22 @@ function reducer(state: PowerDialerState, action: PowerDialerAction): PowerDiale
       return { ...state, queue: q, stats: computeStats(q) }
     }
 
+    case 'AUTO_ADVANCE_NO_ANSWER': {
+      // Silently mark as no_answer and move to next lead — no disposition modal
+      const q = [...state.queue]
+      if (q[state.currentIndex]) {
+        q[state.currentIndex] = { ...q[state.currentIndex], dialStatus: 'no_answer' }
+      }
+      const nextIndex = state.currentIndex + 1
+      if (nextIndex >= q.length) {
+        return { ...state, queue: q, stats: computeStats(q), mode: 'COMPLETED', currentIndex: nextIndex, dialAttempt: 1, callWasAnswered: false, currentPhone: null }
+      }
+      return { ...state, queue: q, stats: computeStats(q), mode: 'READY', currentIndex: nextIndex, dialAttempt: 1, callWasAnswered: false, currentPhone: null, smsStatus: 'idle' }
+    }
+
+    case 'PAUSE_AWAITING_CONTINUE':
+      return { ...state, mode: 'PAUSED_AWAITING_CONTINUE' }
+
     case 'SKIP_LEAD': {
       const q = [...state.queue]
       if (q[state.currentIndex]) {
@@ -266,9 +305,9 @@ function reducer(state: PowerDialerState, action: PowerDialerAction): PowerDiale
     case 'ADVANCE': {
       const nextIndex = state.currentIndex + 1
       if (nextIndex >= state.queue.length) {
-        return { ...state, mode: 'COMPLETED', currentIndex: nextIndex, currentPhone: null, dialAttempt: 1 }
+        return { ...state, mode: 'COMPLETED', currentIndex: nextIndex, currentPhone: null, dialAttempt: 1, callWasAnswered: false }
       }
-      return { ...state, mode: 'READY', currentIndex: nextIndex, currentPhone: null, dialAttempt: 1, smsStatus: 'idle' }
+      return { ...state, mode: 'READY', currentIndex: nextIndex, currentPhone: null, dialAttempt: 1, callWasAnswered: false, smsStatus: 'idle' }
     }
 
     case 'PAUSE':
@@ -295,6 +334,7 @@ interface UsePowerDialerParams {
   duration: number
   deviceReady: boolean
   makeCall: (to: string) => Promise<string | null>
+  hangUp: () => void
   userId: string | undefined
 }
 
@@ -303,6 +343,7 @@ export function usePowerDialer({
   duration,
   deviceReady,
   makeCall,
+  hangUp,
   userId,
 }: UsePowerDialerParams) {
   const [state, dispatch] = useReducer(reducer, initialState)
@@ -314,7 +355,9 @@ export function usePowerDialer({
   const stateRef = useRef(state)
   const redialTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const smsDelayTimeoutRef = useRef<NodeJS.Timeout | null>(null)
+  const noAnswerTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const processLeadRef = useRef(false)
+  const hangUpRef = useRef(hangUp)
 
   // Keep refs in sync
   useEffect(() => {
@@ -324,6 +367,10 @@ export function usePowerDialer({
   useEffect(() => {
     durationRef.current = duration
   }, [duration])
+
+  useEffect(() => {
+    hangUpRef.current = hangUp
+  }, [hangUp])
 
   // ─── Queue Loading ──────────────────────────────────────────────
 
@@ -475,12 +522,25 @@ export function usePowerDialer({
     prevCallStateRef.current = callState
 
     // Only react in power dialer modes
-    if (s.mode === 'IDLE' || s.mode === 'SETUP' || s.mode === 'LOADING_QUEUE' || s.mode === 'COMPLETED' || s.mode === 'PAUSED') {
+    if (s.mode === 'IDLE' || s.mode === 'SETUP' || s.mode === 'LOADING_QUEUE' || s.mode === 'COMPLETED' || s.mode === 'PAUSED' || s.mode === 'PAUSED_AWAITING_CONTINUE') {
       return
     }
 
-    // Call connected → navigate to lead page
+    // Call is ringing → start 15s no-answer timer
+    if (callState === 'ringing' && prevCallState !== 'ringing' && (s.mode === 'DIALING' || s.mode === 'REDIALING')) {
+      if (noAnswerTimeoutRef.current) clearTimeout(noAnswerTimeoutRef.current)
+      noAnswerTimeoutRef.current = setTimeout(() => {
+        // Auto-hangup after 15 seconds of ringing
+        hangUpRef.current()
+      }, 15000)
+    }
+
+    // Call connected → cancel ring timer, navigate to lead page
     if (callState === 'live' && prevCallState !== 'live') {
+      if (noAnswerTimeoutRef.current) {
+        clearTimeout(noAnswerTimeoutRef.current)
+        noAnswerTimeoutRef.current = null
+      }
       dispatch({ type: 'CALL_LIVE' })
       const lead = s.queue[s.currentIndex]
       if (lead) {
@@ -490,11 +550,18 @@ export function usePowerDialer({
 
     // Call ended
     if (callState === 'ended' && prevCallState !== 'ended' && prevCallState !== 'idle') {
-      const callDuration = durationRef.current
-      const wasUnanswered = callDuration < 5
+      if (noAnswerTimeoutRef.current) {
+        clearTimeout(noAnswerTimeoutRef.current)
+        noAnswerTimeoutRef.current = null
+      }
 
-      if (wasUnanswered && s.settings.doubleDial && s.dialAttempt === 1 && s.mode === 'DIALING') {
-        // Double dial: redial after 2 seconds
+      const wasAnswered = s.mode === 'IN_CALL'
+
+      if (wasAnswered) {
+        // Call was answered — show disposition modal
+        dispatch({ type: 'DISPOSITION' })
+      } else if (s.settings.doubleDial && s.dialAttempt === 1) {
+        // First attempt unanswered with double dial → redial after 2 seconds
         dispatch({ type: 'CALL_ENDED_UNANSWERED' })
         redialTimeoutRef.current = setTimeout(async () => {
           if (stateRef.current.currentPhone) {
@@ -503,13 +570,13 @@ export function usePowerDialer({
               await makeCall(stateRef.current.currentPhone)
             } catch {
               toast.error('Redial failed')
-              dispatch({ type: 'DISPOSITION' })
+              dispatch({ type: 'AUTO_ADVANCE_NO_ANSWER' })
             }
           }
         }, 2000)
       } else {
-        // Show disposition
-        dispatch({ type: 'DISPOSITION' })
+        // Unanswered (no double dial, or second attempt failed) → auto-advance silently
+        dispatch({ type: 'AUTO_ADVANCE_NO_ANSWER' })
       }
     }
   }, [callState, makeCall, router])
@@ -520,6 +587,7 @@ export function usePowerDialer({
     return () => {
       if (redialTimeoutRef.current) clearTimeout(redialTimeoutRef.current)
       if (smsDelayTimeoutRef.current) clearTimeout(smsDelayTimeoutRef.current)
+      if (noAnswerTimeoutRef.current) clearTimeout(noAnswerTimeoutRef.current)
     }
   }, [])
 
@@ -548,6 +616,7 @@ export function usePowerDialer({
   const stopSession = useCallback(() => {
     if (redialTimeoutRef.current) clearTimeout(redialTimeoutRef.current)
     if (smsDelayTimeoutRef.current) clearTimeout(smsDelayTimeoutRef.current)
+    if (noAnswerTimeoutRef.current) clearTimeout(noAnswerTimeoutRef.current)
     processLeadRef.current = false
     dispatch({ type: 'STOP' })
   }, [])
@@ -561,6 +630,18 @@ export function usePowerDialer({
     if (disposition) {
       dispatch({ type: 'DISPOSITION_COMPLETE', disposition })
     }
+    dispatch({ type: 'ADVANCE' })
+  }, [])
+
+  const recordDisposition = useCallback((disposition: string) => {
+    dispatch({ type: 'RECORD_DISPOSITION', disposition })
+  }, [])
+
+  const pauseAwaitingContinue = useCallback(() => {
+    dispatch({ type: 'PAUSE_AWAITING_CONTINUE' })
+  }, [])
+
+  const continueAfterAnswered = useCallback(() => {
     dispatch({ type: 'ADVANCE' })
   }, [])
 
@@ -611,9 +692,15 @@ export function usePowerDialer({
     stopSession,
     skipLead,
     advanceToNext,
+    recordDisposition,
+    pauseAwaitingContinue,
+    continueAfterAnswered,
     retryAfterSkipTrace,
     openTemplateEditor,
     closeTemplateEditor,
     closeSkipTrace,
+
+    // Derived state
+    callWasAnswered: state.callWasAnswered,
   }
 }

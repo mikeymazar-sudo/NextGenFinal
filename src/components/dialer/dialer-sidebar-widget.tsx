@@ -74,6 +74,7 @@ export function DialerSidebarWidget() {
         duration,
         deviceReady,
         makeCall: twilioMakeCall,
+        hangUp: twilioHangUp,
         userId: user?.id,
     })
 
@@ -268,7 +269,7 @@ export function DialerSidebarWidget() {
 
     const saveCallNotes = async () => {
         if (isPowerDialerActive) {
-            // Power dialer mode: save notes then advance
+            // Power dialer mode: save notes then pause for user to review lead
             if (currentCallId) {
                 setSavingNotes(true)
                 const result = await api.updateCallNotes(currentCallId, callNotes)
@@ -282,8 +283,11 @@ export function DialerSidebarWidget() {
             setShowNotesModal(false)
             setCallNotes('')
             setCurrentCallId(null)
-            // Advance power dialer to next lead with disposition
-            powerDialer.advanceToNext(lastTag || undefined)
+            // Record the disposition tag without advancing, then wait for user to press Continue
+            if (lastTag) {
+                powerDialer.recordDisposition(lastTag)
+            }
+            powerDialer.pauseAwaitingContinue()
             setLastTag(null)
             return
         }
@@ -423,6 +427,7 @@ export function DialerSidebarWidget() {
                             onResume={powerDialer.resumeSession}
                             onStop={powerDialer.stopSession}
                             onSkip={powerDialer.skipLead}
+                            onContinue={powerDialer.continueAfterAnswered}
                         />
                     ) : (
                         /* ─── Normal Manual Dialer Mode ───────── */
