@@ -42,6 +42,12 @@ const TARGET_FIELDS = [
     { key: 'owner2_name', label: '2nd Owner Name', group: 'Basic' },
     { key: 'owner_phone', label: 'Owner Phone', group: 'Basic' },
     { key: 'owner_email', label: 'Owner Email', group: 'Basic' },
+    { key: 'phone_1', label: 'Phone 1', group: 'Basic' },
+    { key: 'phone_2', label: 'Phone 2', group: 'Basic' },
+    { key: 'phone_3', label: 'Phone 3', group: 'Basic' },
+    { key: 'email_1', label: 'Email 1', group: 'Basic' },
+    { key: 'email_2', label: 'Email 2', group: 'Basic' },
+    { key: 'email_3', label: 'Email 3', group: 'Basic' },
 
     // Mailing Address
     { key: 'mailing_address', label: 'Mailing Address (Full)', group: 'Mailing' },
@@ -120,6 +126,12 @@ const FIELD_KEYWORDS: Record<TargetFieldKey, string[]> = {
     owner2_name: ['owner_2', 'owner_2_fullname', 'second_owner'],
     owner_phone: ['phone', 'mobile', 'cell', 'contact_phone'],
     owner_email: ['email', 'mail', 'contact_email'],
+    phone_1: ['phone1', 'phone_1', 'phone 1', 'tel1', 'mobile1', 'cell1', 'phonenumber1'],
+    phone_2: ['phone2', 'phone_2', 'phone 2', 'tel2', 'mobile2', 'cell2', 'phonenumber2'],
+    phone_3: ['phone3', 'phone_3', 'phone 3', 'tel3', 'mobile3', 'cell3', 'phonenumber3'],
+    email_1: ['email1', 'email_1', 'email 1', 'emailaddress1'],
+    email_2: ['email2', 'email_2', 'email 2', 'emailaddress2'],
+    email_3: ['email3', 'email_3', 'email 3', 'emailaddress3'],
 
     // Mailing
     mailing_address: ['mailing_address', 'mail_address', 'mail_addr', 'owner_address'],

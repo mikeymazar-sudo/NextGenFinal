@@ -148,6 +148,10 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
                     property_type: p.property_type,
                     list_price: p.list_price ? parseFloat(p.list_price.replace(/[^0-9.]/g, '')) : null,
                     owner_name: p.owner_name,
+                    owner_phone: (() => {
+                        const phones = [p.owner_phone, p.phone_1, p.phone_2, p.phone_3].filter(Boolean)
+                        return phones.length > 0 ? phones : null
+                    })(),
 
                     status: 'new',
                     created_by: user.id,
@@ -177,9 +181,46 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
                 } else {
                     imported += data?.length || 0;
 
-                    // If we have owner phone/email, we should ideally create contacts here too.
-                    // For this iteration, let's focus on the property data mapping success.
-                    // Future task: Extract owner_phone/owner_email and insert into 'contacts' table linked to these property IDs.
+                    // Create contacts for any properties that have phone/email data in the CSV
+                    if (data && data.length > 0) {
+                        const contactsToInsert: any[] = [];
+                        for (let j = 0; j < data.length; j++) {
+                            const p = batch[j];
+                            const propertyId = data[j].id;
+
+                            // Collect phones: owner_phone + phone_1/2/3, deduplicated, max 3
+                            const rawPhones = [p.owner_phone, p.phone_1, p.phone_2, p.phone_3]
+                                .filter(Boolean) as string[];
+                            const uniquePhones = [...new Set(rawPhones)].slice(0, 3);
+
+                            // Collect emails: owner_email + email_1/2/3, deduplicated, max 3
+                            const rawEmails = [p.owner_email, p.email_1, p.email_2, p.email_3]
+                                .filter(Boolean) as string[];
+                            const uniqueEmails = [...new Set(rawEmails)].slice(0, 3);
+
+                            if (uniquePhones.length === 0 && uniqueEmails.length === 0) continue;
+
+                            contactsToInsert.push({
+                                property_id: propertyId,
+                                name: p.owner_name || null,
+                                phone_numbers: uniquePhones.map((v, i) => ({
+                                    value: v,
+                                    label: 'mobile',
+                                    is_primary: i === 0,
+                                })),
+                                emails: uniqueEmails.map((v, i) => ({
+                                    value: v,
+                                    label: 'personal',
+                                    is_primary: i === 0,
+                                })),
+                            });
+                        }
+                        if (contactsToInsert.length > 0) {
+                            await supabase
+                                .from('contacts')
+                                .upsert(contactsToInsert, { onConflict: 'property_id', ignoreDuplicates: true });
+                        }
+                    }
                 }
             }
         }
