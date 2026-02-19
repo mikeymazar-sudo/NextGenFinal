@@ -3,7 +3,7 @@
 import { useReducer, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { api } from '@/lib/api-client'
+import { api } from '@/lib/api/client'
 import { toast } from 'sonner'
 import type {
   PowerDialerLead,

@@ -12,7 +12,7 @@ import {
     SelectValue,
 } from '@/components/ui/select'
 import { ChevronDown, ChevronUp, SlidersHorizontal } from 'lucide-react'
-import type { CompFilterOptions } from '@/lib/api-client'
+import type { CompFilterOptions } from '@/lib/api/client'
 
 interface CompsFiltersProps {
     subjectBedrooms: number | null

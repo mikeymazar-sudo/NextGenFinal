@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server'
 import twilio from 'twilio'
 import { withAuth } from '@/lib/auth/middleware'
-import { apiSuccess, Errors } from '@/lib/api-response'
+import { apiSuccess, Errors } from '@/lib/api/response'
 
 export const GET = withAuth(async (_req: NextRequest, { user }) => {
   try {

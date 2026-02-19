@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Search, Loader2 } from 'lucide-react'
-import { api } from '@/lib/api-client'
+import { api } from '@/lib/api/client'
 import { toast } from 'sonner'
 
 interface PropertySearchProps {

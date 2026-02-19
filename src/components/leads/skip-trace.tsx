@@ -55,7 +55,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
-import { api } from '@/lib/api-client'
+import { api } from '@/lib/api/client'
 import { createClient } from '@/lib/supabase/client'
 import { EmailComposer } from './email-composer'
 import { format } from 'date-fns'
@@ -66,7 +66,7 @@ import {
   fmtCurrency,
   fmtDate,
   type NormalizedPropertyData,
-} from '@/lib/property-data-utils'
+} from '@/lib/property/data-utils'
 import {
   WholesaleIndicators,
   FinancialOverview,
@@ -625,8 +625,19 @@ export function SkipTrace({ propertyId, ownerName, address, city, state, zip, ex
     setSaving(false)
   }
 
-  const handleSetPrimary = async (type: 'phone' | 'email', index: number) => {
+  const handleSetPrimary = async (type: 'phone' | 'email', value: string) => {
     if (!contactId) return
+
+    // Find the correct DB index from the unsorted contact data (allPhones is sorted, so we can't use visual index)
+    const contact = contacts[0]
+    const rawEntries = type === 'phone'
+      ? normalizePhoneEntries((contact?.phone_numbers || []) as any[])
+      : normalizeEmailEntries((contact?.emails || []) as any[])
+    const index = rawEntries.findIndex(e => e.value === value)
+    if (index === -1) {
+      toast.error('Could not find entry to update')
+      return
+    }
 
     const result = await api.updateContact(contactId, type, index, { is_primary: true })
 
@@ -976,7 +987,7 @@ export function SkipTrace({ propertyId, ownerName, address, city, state, zip, ex
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           {!phone.is_primary && (
-                            <DropdownMenuItem onClick={() => handleSetPrimary('phone', i)}>
+                            <DropdownMenuItem onClick={() => handleSetPrimary('phone', phone.value)}>
                               <Star className="mr-2 h-4 w-4" />
                               Set as Primary
                             </DropdownMenuItem>
@@ -1070,7 +1081,7 @@ export function SkipTrace({ propertyId, ownerName, address, city, state, zip, ex
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
                       {!entry.is_primary && (
-                        <DropdownMenuItem onClick={() => handleSetPrimary('email', idx)}>
+                        <DropdownMenuItem onClick={() => handleSetPrimary('email', entry.value)}>
                           <Star className="mr-2 h-4 w-4" />
                           Set as Primary
                         </DropdownMenuItem>

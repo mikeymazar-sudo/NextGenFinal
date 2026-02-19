@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server'
 import { z } from 'zod'
 import { withAuth } from '@/lib/auth/middleware'
-import { apiSuccess, Errors } from '@/lib/api-response'
+import { apiSuccess, Errors } from '@/lib/api/response'
 import { createAdminClient } from '@/lib/supabase/server'
 
 const UpdateNoteSchema = z.object({

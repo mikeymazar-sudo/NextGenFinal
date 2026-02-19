@@ -12,7 +12,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Home, DollarSign, TrendingUp, ExternalLink, Bed, Bath, Ruler, Calendar, MapPin, Map } from 'lucide-react'
-import { api, type CompFilterOptions } from '@/lib/api-client'
+import { api, type CompFilterOptions } from '@/lib/api/client'
 import { toast } from 'sonner'
 import { CompsMap } from './comps-map'
 import { CompsFilters } from './comps-filters'

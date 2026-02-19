@@ -34,7 +34,7 @@ import {
   fmtDate,
   display,
   type NormalizedPropertyData,
-} from '@/lib/property-data-utils'
+} from '@/lib/property/data-utils'
 import type { Property } from '@/types/schema'
 
 // --- Shared UI helpers ---

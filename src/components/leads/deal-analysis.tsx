@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Brain, RefreshCw, AlertTriangle } from 'lucide-react'
-import { api } from '@/lib/api-client'
+import { api } from '@/lib/api/client'
 import { toast } from 'sonner'
 import type { DealAnalysis } from '@/types/schema'
 

@@ -11,7 +11,7 @@ import {
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Loader2, Search, Phone, SkipForward, MapPin, User } from 'lucide-react'
-import { api } from '@/lib/api-client'
+import { api } from '@/lib/api/client'
 import { toast } from 'sonner'
 import type { PowerDialerLead, PhoneEntry } from '@/types/schema'
 

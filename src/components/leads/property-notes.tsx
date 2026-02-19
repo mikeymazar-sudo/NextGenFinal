@@ -14,7 +14,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { StickyNote, Send, Pencil, Trash2, Phone, FileText, Download, Copy, Loader2 } from 'lucide-react'
-import { api } from '@/lib/api-client'
+import { api } from '@/lib/api/client'
 import { toast } from 'sonner'
 import { formatDistanceToNow } from 'date-fns'
 import type { Note, Call } from '@/types/schema'

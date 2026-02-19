@@ -13,7 +13,7 @@ import {
     SelectValue,
 } from '@/components/ui/select'
 import { toast } from 'sonner'
-import { api } from '@/lib/api-client'
+import { api } from '@/lib/api/client'
 import { cn } from '@/lib/utils'
 
 export interface EmailComposerProps {

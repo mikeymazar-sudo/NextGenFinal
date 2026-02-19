@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { withAuth } from '@/lib/auth/middleware';
-import { Errors, apiSuccess } from '@/lib/api-response';
+import { Errors, apiSuccess } from '@/lib/api/response';
 
 export const POST = withAuth(async (req: NextRequest, { user }) => {
     try {

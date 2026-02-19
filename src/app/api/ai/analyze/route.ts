@@ -1,8 +1,8 @@
 import { NextRequest } from 'next/server'
 import { z } from 'zod'
 import { withAuth } from '@/lib/auth/middleware'
-import { checkRateLimit } from '@/lib/rate-limit'
-import { apiSuccess, Errors } from '@/lib/api-response'
+import { checkRateLimit } from '@/lib/api/rate-limit'
+import { apiSuccess, Errors } from '@/lib/api/response'
 import { createAdminClient } from '@/lib/supabase/server'
 
 const AnalyzeSchema = z.object({

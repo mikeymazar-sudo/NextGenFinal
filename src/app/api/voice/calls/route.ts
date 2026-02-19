@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { withAuth } from '@/lib/auth/middleware'
-import { apiSuccess, Errors } from '@/lib/api-response'
+import { apiSuccess, Errors } from '@/lib/api/response'
 import { createAdminClient } from '@/lib/supabase/server'
 
 export const GET = withAuth(async (req: NextRequest, { user }) => {

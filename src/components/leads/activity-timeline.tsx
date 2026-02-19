@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Activity, StickyNote, Mail, Phone, ArrowRightLeft } from 'lucide-react'
-import { api } from '@/lib/api-client'
+import { api } from '@/lib/api/client'
 import { formatDistanceToNow } from 'date-fns'
 import type { ActivityItem } from '@/types/schema'
 

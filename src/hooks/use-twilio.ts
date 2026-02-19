@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { Device, Call } from '@twilio/voice-sdk'
-import { api } from '@/lib/api-client'
+import { api } from '@/lib/api/client'
 
 export type TwilioCallState = 'idle' | 'connecting' | 'ringing' | 'live' | 'ended'
 
