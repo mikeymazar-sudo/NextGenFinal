@@ -114,6 +114,17 @@ const TARGET_FIELDS = [
 
 type TargetFieldKey = (typeof TARGET_FIELDS)[number]['key']
 
+// Phone target field keys — used to apply extra validation before auto-mapping.
+const PHONE_FIELD_KEYS = new Set<TargetFieldKey>(['owner_phone', 'phone_1', 'phone_2', 'phone_3'])
+
+// Column name patterns that should NEVER be auto-mapped to phone fields.
+// These typically hold carrier names, line types, or DNC flags rather than actual numbers.
+const CARRIER_COLUMN_BLOCKLIST = [
+    'carrier', 'phone_type', 'phonetype', 'line_type', 'linetype',
+    'phone_carrier', 'number_type', 'numbertype', 'dnc', 'do_not_call',
+    'donotcall', 'type_of_phone', 'phone_line_type',
+]
+
 // Keywords that suggest a CSV column should map to a target field.
 const FIELD_KEYWORDS: Record<TargetFieldKey, string[]> = {
     // Basic
@@ -124,14 +135,14 @@ const FIELD_KEYWORDS: Record<TargetFieldKey, string[]> = {
     property_type: ['property_type', 'prop_type', 'type', 'use_code', 'land_use_desc', 'standardized_land_use'],
     owner_name: ['owner', 'name', 'seller', 'grantor', 'contact', 'owner_1_fullname'],
     owner2_name: ['owner_2', 'owner_2_fullname', 'second_owner'],
-    owner_phone: ['phone', 'mobile', 'cell', 'contact_phone'],
-    owner_email: ['email', 'mail', 'contact_email'],
-    phone_1: ['phone1', 'phone_1', 'phone 1', 'tel1', 'mobile1', 'cell1', 'phonenumber1'],
-    phone_2: ['phone2', 'phone_2', 'phone 2', 'tel2', 'mobile2', 'cell2', 'phonenumber2'],
-    phone_3: ['phone3', 'phone_3', 'phone 3', 'tel3', 'mobile3', 'cell3', 'phonenumber3'],
-    email_1: ['email1', 'email_1', 'email 1', 'emailaddress1'],
-    email_2: ['email2', 'email_2', 'email 2', 'emailaddress2'],
-    email_3: ['email3', 'email_3', 'email 3', 'emailaddress3'],
+    owner_phone: ['phone', 'mobile', 'cell', 'contact_phone', 'owner_phone', 'phonenumber', 'phone_number'],
+    owner_email: ['email', 'mail', 'contact_email', 'owner_email', 'emailaddress', 'email_address'],
+    phone_1: ['phone1', 'phone_1', 'phone 1', 'tel1', 'mobile1', 'cell1', 'phonenumber1', 'mobile_1', 'mobile-1', 'phone_number_1'],
+    phone_2: ['phone2', 'phone_2', 'phone 2', 'tel2', 'mobile2', 'cell2', 'phonenumber2', 'mobile_2', 'mobile-2', 'phone_number_2'],
+    phone_3: ['phone3', 'phone_3', 'phone 3', 'tel3', 'mobile3', 'cell3', 'phonenumber3', 'mobile_3', 'mobile-3', 'phone_number_3'],
+    email_1: ['email1', 'email_1', 'email 1', 'emailaddress1', 'email_address_1'],
+    email_2: ['email2', 'email_2', 'email 2', 'emailaddress2', 'email_address_2'],
+    email_3: ['email3', 'email_3', 'email 3', 'emailaddress3', 'email_address_3'],
 
     // Mailing
     mailing_address: ['mailing_address', 'mail_address', 'mail_addr', 'owner_address'],
@@ -203,11 +214,18 @@ const FIELD_KEYWORDS: Record<TargetFieldKey, string[]> = {
 function autoDetectMapping(csvCol: string, alreadyMapped: Set<string>): string {
     const normalized = csvCol.toLowerCase().trim().replace(/[\s\-]+/g, '_')
 
+    // Never auto-map carrier/type columns to phone fields
+    const isCarrierCol = CARRIER_COLUMN_BLOCKLIST.some(
+        (blocked) => normalized === blocked || normalized.includes(blocked)
+    )
+
     let bestMatch = ''
     let bestScore = 0
 
     for (const field of TARGET_FIELDS) {
         if (alreadyMapped.has(field.key)) continue
+        if (isCarrierCol && PHONE_FIELD_KEYS.has(field.key as TargetFieldKey)) continue
+
         const keywords = FIELD_KEYWORDS[field.key]
 
         for (const kw of keywords) {
@@ -262,7 +280,16 @@ function buildInitialMappings(csvColumns: string[], firstRow?: RawRow): Record<s
         }
 
         const normalized = col.toLowerCase().trim().replace(/[\s\-]+/g, '_')
+
+        // Never auto-map columns whose name indicates carrier/type data to phone fields
+        const isCarrierCol = CARRIER_COLUMN_BLOCKLIST.some(
+            (blocked) => normalized === blocked || normalized.includes(blocked)
+        )
+
         for (const field of TARGET_FIELDS) {
+            // Skip phone fields entirely for carrier-type columns
+            if (isCarrierCol && PHONE_FIELD_KEYS.has(field.key as TargetFieldKey)) continue
+
             const keywords = FIELD_KEYWORDS[field.key]
             let bestScore = 0
             for (const kw of keywords) {
@@ -272,6 +299,7 @@ function buildInitialMappings(csvColumns: string[], firstRow?: RawRow): Record<s
                 else if (normalized.includes(kw)) score = 60
                 if (score > bestScore) bestScore = score
             }
+
             if (bestScore >= 60) {
                 scores.push({ col, target: field.key, score: bestScore })
             }

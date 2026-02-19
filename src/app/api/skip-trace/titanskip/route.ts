@@ -147,9 +147,15 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
           if (persons.length > 0) {
             const contacts = persons.map((person: Record<string, any>) => {
               const phoneNumbers = person.phoneNumbers || []
-              const phones = phoneNumbers.map((p: any) => p.number?.toString() || '').filter(Boolean)
+              const phones = phoneNumbers
+                .map((p: any) => p.number?.toString() || '')
+                .filter((v: string) => v && /\d{7,}/.test(v.replace(/\D/g, '')))
+                .slice(0, 3)
               const emailList = person.emails || []
-              const emails = emailList.map((e: any) => e.email || e.address || '').filter(Boolean)
+              const emails = emailList
+                .map((e: any) => e.email || e.address || '')
+                .filter((v: string) => v && v.includes('@'))
+                .slice(0, 3)
               const nameObj = person.name || {}
               const fullName = nameObj.full || [nameObj.first, nameObj.last].filter(Boolean).join(' ') || 'Unknown Owner'
 

@@ -138,11 +138,17 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
     const contacts = persons.map((person: Record<string, unknown>) => {
       // Handle phoneNumbers array (BatchData format)
       const phoneNumbers = person.phoneNumbers as Array<Record<string, unknown>> || []
-      const phones = phoneNumbers.map((p) => p.number?.toString() || '').filter(Boolean).slice(0, 3)
+      const phones = phoneNumbers
+        .map((p) => p.number?.toString() || '')
+        .filter((v) => v && /\d{7,}/.test(v.replace(/\D/g, '')))
+        .slice(0, 3)
 
       // Handle emails array
       const emailList = person.emails as Array<Record<string, string>> || []
-      const emails = emailList.map((e) => e.email || e.address || '').filter(Boolean).slice(0, 3)
+      const emails = emailList
+        .map((e) => e.email || e.address || '')
+        .filter((v) => v && v.includes('@'))
+        .slice(0, 3)
 
       // Get name from nested object
       const nameObj = person.name as Record<string, string> | null

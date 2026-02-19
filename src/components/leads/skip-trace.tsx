@@ -103,7 +103,7 @@ interface SkipTraceProps {
 // Helper to normalize phone/email entries (handles both old string[] and new object[] formats)
 function normalizePhoneEntries(phones: PhoneEntry[] | string[]): PhoneEntry[] {
   if (!phones || phones.length === 0) return []
-  return phones.map((p, i) => {
+  const entries = phones.map((p, i) => {
     let entry: PhoneEntry
 
     if (typeof p === 'string') {
@@ -141,6 +141,8 @@ function normalizePhoneEntries(phones: PhoneEntry[] | string[]): PhoneEntry[] {
 
     return entry
   })
+
+  return entries
 }
 
 function normalizeEmailEntries(emails: EmailEntry[] | string[]): EmailEntry[] {
