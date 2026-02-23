@@ -6,6 +6,9 @@ import type {
   SoldEstimate,
   Note,
   ActivityItem,
+  AnalysisSettings,
+  PropertyPhoto,
+  VisionAssessment,
 } from '@/types/schema'
 
 export interface CompFilterOptions {
@@ -72,8 +75,59 @@ class ApiClient {
   }
 
   // Analysis
-  async analyzeProperty(propertyId: string) {
+  async analyzeProperty(propertyId: string, overrides?: Partial<AnalysisSettings>, force?: boolean) {
     return this.request<DealAnalysis>('/api/ai/analyze', {
+      method: 'POST',
+      body: JSON.stringify({ propertyId, overrides, force }),
+    })
+  }
+
+  async getAnalysisSettings() {
+    return this.request<AnalysisSettings>('/api/ai/settings')
+  }
+
+  async updateAnalysisSettings(settings: Partial<AnalysisSettings>) {
+    return this.request<AnalysisSettings>('/api/ai/settings', {
+      method: 'PUT',
+      body: JSON.stringify({ settings }),
+    })
+  }
+
+  // Photos
+  async uploadPhoto(propertyId: string, base64: string, filename: string) {
+    return this.request<PropertyPhoto>('/api/photos', {
+      method: 'POST',
+      body: JSON.stringify({ propertyId, base64, filename }),
+    })
+  }
+
+  async getPhotos(propertyId: string) {
+    return this.request<PropertyPhoto[]>(`/api/photos?propertyId=${propertyId}`)
+  }
+
+  async deletePhoto(photoId: string) {
+    return this.request<{ deleted: boolean }>(`/api/photos/${photoId}`, {
+      method: 'DELETE',
+    })
+  }
+
+  async analyzePropertyPhotos(propertyId: string, photoIds?: string[]) {
+    return this.request<{ assessments: VisionAssessment[]; aggregate: Record<string, unknown> }>('/api/ai/vision', {
+      method: 'POST',
+      body: JSON.stringify({ propertyId, photoIds }),
+    })
+  }
+
+  // Comp Images
+  async fetchCompImages(propertyId: string, comps: Array<{ address: string; type: 'sold' | 'rental' }>) {
+    return this.request<Array<{ address: string; street_view: boolean; listing_images: number }>>('/api/comps/images', {
+      method: 'POST',
+      body: JSON.stringify({ propertyId, comps }),
+    })
+  }
+
+  async analyzeCompImages(propertyId: string) {
+    return this.request<Record<string, unknown>>('/api/ai/vision-comps', {
       method: 'POST',
       body: JSON.stringify({ propertyId }),
     })

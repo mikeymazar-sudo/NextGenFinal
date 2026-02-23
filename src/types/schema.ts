@@ -53,6 +53,8 @@ export interface Property {
   list_id: string | null
   list?: LeadList
   raw_realestate_data?: Record<string, any> | null
+  analysis_overrides?: Partial<AnalysisSettings> | null
+  calculator_scenarios?: Record<string, unknown>[]
   unanswered_count: number
   last_called_at: string | null
   has_been_answered: boolean
@@ -126,6 +128,110 @@ export interface DealAnalysis {
   risk_factors: string[]
   recommendation: string
   confidence: 'low' | 'medium' | 'high'
+  // Enhanced fields (v2 analysis)
+  holding_costs?: number
+  assignment_fee?: number
+  total_investment?: number
+  estimated_profit?: number
+  noi?: number
+  cap_rate?: number
+  cash_on_cash?: number
+  monthly_cash_flow?: number
+  annual_cash_flow?: number
+  grm?: number
+  dscr?: number
+  data_sources_used?: string[]
+  seller_motivation_signals?: string[]
+  negotiation_insights?: string[]
+  assumptions_used?: Partial<AnalysisSettings>
+}
+
+// ─── Analysis Settings ───
+
+export interface AnalysisSettings {
+  mao_percentage: number
+  repair_buffer_percentage: number
+  holding_months: number
+  holding_cost_monthly: number
+  assignment_fee_target: number
+  vacancy_rate: number
+  management_fee: number
+  maintenance_reserve: number
+  capex_reserve: number
+  insurance_annual: number
+  down_payment_percentage: number
+  interest_rate: number
+  loan_term_years: number
+  closing_costs_percentage: number
+  target_cap_rate: number
+  target_cash_on_cash: number
+}
+
+export const DEFAULT_ANALYSIS_SETTINGS: AnalysisSettings = {
+  mao_percentage: 70,
+  repair_buffer_percentage: 0,
+  holding_months: 3,
+  holding_cost_monthly: 1500,
+  assignment_fee_target: 10000,
+  vacancy_rate: 8,
+  management_fee: 10,
+  maintenance_reserve: 5,
+  capex_reserve: 5,
+  insurance_annual: 1200,
+  down_payment_percentage: 25,
+  interest_rate: 7.5,
+  loan_term_years: 30,
+  closing_costs_percentage: 3,
+  target_cap_rate: 8,
+  target_cash_on_cash: 10,
+}
+
+// ─── Vision Assessment ───
+
+export interface VisionRepairItem {
+  item: string
+  category: 'structural' | 'roof' | 'plumbing' | 'electrical' | 'hvac' | 'cosmetic' | 'landscaping' | 'other'
+  estimated_cost_low: number
+  estimated_cost_high: number
+  urgency: 'immediate' | 'short_term' | 'cosmetic'
+}
+
+export interface VisionAssessment {
+  condition_rating: number
+  condition_label: 'poor' | 'fair' | 'average' | 'good' | 'excellent'
+  visible_issues: string[]
+  repair_items: VisionRepairItem[]
+  overall_notes: string
+  curb_appeal_score?: number
+}
+
+// ─── Property Photos ───
+
+export interface PropertyPhoto {
+  id: string
+  property_id: string
+  storage_path: string
+  filename: string
+  size_bytes: number
+  caption: string | null
+  display_order: number
+  vision_assessment: VisionAssessment | null
+  created_by: string | null
+  created_at: string
+}
+
+// ─── Comp Images ───
+
+export interface CompImage {
+  id: string
+  property_id: string
+  comp_address: string
+  comp_type: 'sold' | 'rental'
+  image_type: 'street_view' | 'listing_exterior' | 'listing_interior'
+  storage_path: string | null
+  source_url: string | null
+  vision_assessment: Record<string, unknown> | null
+  created_at: string
 }
 
 export interface PhoneEntry {
@@ -211,6 +317,9 @@ export interface ActivityItem {
   status?: string
   user: string | null
   created_at: string
+  callId?: string
+  recording_url?: string | null
+  duration?: number | null
 }
 
 // Power Dialer types

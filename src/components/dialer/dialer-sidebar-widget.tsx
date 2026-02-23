@@ -796,6 +796,7 @@ export function DialerSidebarWidget() {
             <PowerDialerSkipTraceDialog
                 open={powerDialer.showSkipTraceDialog}
                 lead={powerDialer.currentLead}
+                disconnectedNumber={powerDialer.disconnectedNumber}
                 onSkip={powerDialer.skipLead}
                 onPhoneFound={powerDialer.retryAfterSkipTrace}
                 onOpenChange={(open) => {

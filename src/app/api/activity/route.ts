@@ -35,7 +35,7 @@ export const GET = withAuth(async (req: NextRequest, { user }) => {
         .order('created_at', { ascending: false }),
       supabase
         .from('calls')
-        .select('id, status, duration, to_number, notes, created_at, caller:profiles!calls_caller_id_fkey(full_name)')
+        .select('id, status, duration, to_number, notes, recording_url, created_at, caller:profiles!calls_caller_id_fkey(full_name)')
         .eq('property_id', propertyId)
         .order('created_at', { ascending: false }),
     ])
@@ -89,6 +89,9 @@ export const GET = withAuth(async (req: NextRequest, { user }) => {
         status: call.status || undefined,
         user: usr?.full_name || null,
         created_at: call.created_at,
+        callId: call.id,
+        recording_url: (call as any).recording_url || null,
+        duration: call.duration || 0,
       })
     }
 

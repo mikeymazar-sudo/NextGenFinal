@@ -77,6 +77,28 @@ export function resolveBestPhone(lead: PowerDialerLead): string | null {
   return null
 }
 
+/** Collect all phone numbers from a lead (contacts + owner_phone) */
+export function getAllPhones(lead: PowerDialerLead): string[] {
+  const phones: string[] = []
+  if (lead.contactPhones && lead.contactPhones.length > 0) {
+    for (const p of lead.contactPhones) {
+      if (typeof p === 'string' && p.trim()) {
+        phones.push(p)
+      } else if (typeof p === 'object' && (p as PhoneEntry).value) {
+        phones.push((p as PhoneEntry).value)
+      }
+    }
+  }
+  if (lead.ownerPhone && lead.ownerPhone.length > 0) {
+    for (const p of lead.ownerPhone) {
+      if (p.trim() && !phones.includes(p)) {
+        phones.push(p)
+      }
+    }
+  }
+  return phones
+}
+
 // ─── State Machine ────────────────────────────────────────────────
 
 type TwilioCallState = 'idle' | 'connecting' | 'ringing' | 'live' | 'ended'
@@ -94,6 +116,8 @@ interface PowerDialerState {
   currentPhone: string | null
   stats: PowerDialerSessionStats
   callWasAnswered: boolean
+  instantFailCount: number
+  disconnectedNumber: string | null
 }
 
 type PowerDialerAction =
@@ -118,6 +142,8 @@ type PowerDialerAction =
   | { type: 'RECORD_DISPOSITION'; disposition: string }
   | { type: 'DISPOSITION_COMPLETE'; disposition: string }
   | { type: 'AUTO_ADVANCE_NO_ANSWER' }
+  | { type: 'CALL_FAILED_INSTANT' }
+  | { type: 'NUMBER_DISCONNECTED'; phone: string; alternatePhones: string[] }
   | { type: 'PAUSE_AWAITING_CONTINUE' }
   | { type: 'SKIP_LEAD' }
   | { type: 'ADVANCE' }
@@ -150,6 +176,8 @@ const initialState: PowerDialerState = {
   currentPhone: null,
   stats: { total: 0, called: 0, noAnswer: 0, interested: 0, notInterested: 0, skipped: 0 },
   callWasAnswered: false,
+  instantFailCount: 0,
+  disconnectedNumber: null,
 }
 
 function reducer(state: PowerDialerState, action: PowerDialerAction): PowerDialerState {
@@ -177,6 +205,8 @@ function reducer(state: PowerDialerState, action: PowerDialerAction): PowerDiale
         currentIndex: 0,
         dialAttempt: 1,
         callWasAnswered: false,
+        instantFailCount: 0,
+        disconnectedNumber: null,
         stats: computeStats(action.queue),
       }
 
@@ -286,9 +316,24 @@ function reducer(state: PowerDialerState, action: PowerDialerAction): PowerDiale
       }
       const nextIndex = state.currentIndex + 1
       if (nextIndex >= q.length) {
-        return { ...state, queue: q, stats: computeStats(q), mode: 'COMPLETED', currentIndex: nextIndex, dialAttempt: 1, callWasAnswered: false, currentPhone: null }
+        return { ...state, queue: q, stats: computeStats(q), mode: 'COMPLETED', currentIndex: nextIndex, dialAttempt: 1, callWasAnswered: false, currentPhone: null, instantFailCount: 0, disconnectedNumber: null }
       }
-      return { ...state, queue: q, stats: computeStats(q), mode: 'READY', currentIndex: nextIndex, dialAttempt: 1, callWasAnswered: false, currentPhone: null, smsStatus: 'idle' }
+      return { ...state, queue: q, stats: computeStats(q), mode: 'READY', currentIndex: nextIndex, dialAttempt: 1, callWasAnswered: false, currentPhone: null, smsStatus: 'idle', instantFailCount: 0, disconnectedNumber: null }
+    }
+
+    case 'CALL_FAILED_INSTANT':
+      // Increment instant fail count, stay in DIALING mode for auto-retry
+      return { ...state, instantFailCount: state.instantFailCount + 1, mode: 'DIALING' }
+
+    case 'NUMBER_DISCONNECTED': {
+      // Number confirmed not in service after 2 instant fails, show dialog with available numbers
+      return {
+        ...state,
+        mode: 'SKIP_TRACING',
+        showSkipTraceDialog: true,
+        disconnectedNumber: action.phone,
+        instantFailCount: 0,
+      }
     }
 
     case 'PAUSE_AWAITING_CONTINUE':
@@ -299,15 +344,15 @@ function reducer(state: PowerDialerState, action: PowerDialerAction): PowerDiale
       if (q[state.currentIndex]) {
         q[state.currentIndex] = { ...q[state.currentIndex], dialStatus: 'skipped' }
       }
-      return { ...state, queue: q, showSkipTraceDialog: false, stats: computeStats(q) }
+      return { ...state, queue: q, showSkipTraceDialog: false, disconnectedNumber: null, stats: computeStats(q) }
     }
 
     case 'ADVANCE': {
       const nextIndex = state.currentIndex + 1
       if (nextIndex >= state.queue.length) {
-        return { ...state, mode: 'COMPLETED', currentIndex: nextIndex, currentPhone: null, dialAttempt: 1, callWasAnswered: false }
+        return { ...state, mode: 'COMPLETED', currentIndex: nextIndex, currentPhone: null, dialAttempt: 1, callWasAnswered: false, instantFailCount: 0, disconnectedNumber: null }
       }
-      return { ...state, mode: 'READY', currentIndex: nextIndex, currentPhone: null, dialAttempt: 1, callWasAnswered: false, smsStatus: 'idle' }
+      return { ...state, mode: 'READY', currentIndex: nextIndex, currentPhone: null, dialAttempt: 1, callWasAnswered: false, smsStatus: 'idle', instantFailCount: 0, disconnectedNumber: null }
     }
 
     case 'PAUSE':
@@ -397,8 +442,8 @@ export function usePowerDialer({
         // Unanswered leads: has been called at least once but never answered
         query = query.gt('unanswered_count', 0)
       } else {
-        // "All New Leads" = status is 'new'
-        query = query.eq('status', 'new')
+        // "All New Leads" = status is 'new' AND never been called
+        query = query.eq('status', 'new').is('last_called_at', null)
       }
 
       query = query.order('created_at', { ascending: true })
@@ -560,8 +605,47 @@ export function usePowerDialer({
       }
 
       const wasAnswered = s.mode === 'IN_CALL'
+      // Detect instant-fail: call ended without ever ringing (connecting → ended)
+      const wasInstantFail = !wasAnswered && prevCallState === 'connecting' && (s.mode === 'DIALING' || s.mode === 'REDIALING')
 
-      if (wasAnswered) {
+      if (wasInstantFail) {
+        // Number failed without ringing
+        const failCount = s.instantFailCount + 1
+        if (failCount < 2) {
+          // First instant fail — retry once more after 1.5s
+          dispatch({ type: 'CALL_FAILED_INSTANT' })
+          toast.info('Call failed — retrying...')
+          redialTimeoutRef.current = setTimeout(async () => {
+            if (stateRef.current.currentPhone) {
+              dispatch({ type: 'DIALING', phone: stateRef.current.currentPhone })
+              try {
+                await makeCall(stateRef.current.currentPhone)
+              } catch {
+                // If makeCall itself fails, treat as disconnected
+                const lead = stateRef.current.queue[stateRef.current.currentIndex]
+                const currentPhone = stateRef.current.currentPhone
+                if (lead && currentPhone) {
+                  // Find alternate phones (exclude disconnected one)
+                  const allPhones = getAllPhones(lead)
+                  const alternatePhones = allPhones.filter(p => toE164(p) !== currentPhone && p !== currentPhone)
+                  dispatch({ type: 'NUMBER_DISCONNECTED', phone: currentPhone, alternatePhones })
+                }
+              }
+            }
+          }, 1500)
+        } else {
+          // Second instant fail — number is confirmed not in service
+          const lead = s.queue[s.currentIndex]
+          const currentPhone = s.currentPhone
+          if (lead && currentPhone) {
+            toast.error('Number not in service')
+            // Find alternate phones (exclude disconnected one)
+            const allPhones = getAllPhones(lead)
+            const alternatePhones = allPhones.filter(p => toE164(p) !== currentPhone && p !== currentPhone)
+            dispatch({ type: 'NUMBER_DISCONNECTED', phone: currentPhone, alternatePhones })
+          }
+        }
+      } else if (wasAnswered) {
         // Call was answered — show disposition modal
         dispatch({ type: 'DISPOSITION' })
         // Mark lead as answered in the DB
@@ -590,10 +674,20 @@ export function usePowerDialer({
             } catch {
               toast.error('Redial failed')
               dispatch({ type: 'AUTO_ADVANCE_NO_ANSWER' })
-              // Track unanswered in DB
+              // Track unanswered in DB + create call record
               const failedLead = stateRef.current.queue[stateRef.current.currentIndex]
               if (failedLead) {
                 const sb = createClient()
+                // Log unanswered call in calls table
+                sb.from('calls').insert({
+                  caller_id: userId,
+                  to_number: stateRef.current.currentPhone,
+                  status: 'no-answer',
+                  duration: 0,
+                  from_number: '',
+                  property_id: failedLead.propertyId,
+                  ended_at: new Date().toISOString(),
+                }).then()
                 sb.rpc('increment_unanswered', { prop_id: failedLead.propertyId }).then(({ error: rpcErr }) => {
                   if (rpcErr) {
                     sb.from('properties')
@@ -615,10 +709,20 @@ export function usePowerDialer({
       } else {
         // Unanswered (no double dial, or second attempt failed) → auto-advance silently
         dispatch({ type: 'AUTO_ADVANCE_NO_ANSWER' })
-        // Track unanswered in DB
+        // Track unanswered in DB + create call record
         const lead = s.queue[s.currentIndex]
         if (lead) {
           const supabase = createClient()
+          // Log unanswered call in calls table
+          supabase.from('calls').insert({
+            caller_id: userId,
+            to_number: s.currentPhone,
+            status: 'no-answer',
+            duration: 0,
+            from_number: '',
+            property_id: lead.propertyId,
+            ended_at: new Date().toISOString(),
+          }).then()
           supabase.rpc('increment_unanswered', { prop_id: lead.propertyId }).then(({ error }) => {
             if (error) {
               // Fallback: manual update
@@ -746,6 +850,7 @@ export function usePowerDialer({
     showSetupDialog: state.showSetupDialog,
     showSkipTraceDialog: state.showSkipTraceDialog,
     showTemplateEditor: state.showTemplateEditor,
+    disconnectedNumber: state.disconnectedNumber,
 
     // Actions
     openSetup,

@@ -10,7 +10,11 @@ const RATE_LIMITS: Record<string, RateLimitConfig> = {
   'ai-analyze': { maxCalls: 20, windowMinutes: 60 },
   'skip-trace': { maxCalls: 30, windowMinutes: 60 },
   'rental-comps': { maxCalls: 50, windowMinutes: 60 },
+  'sold-comps': { maxCalls: 30, windowMinutes: 60 },
   'send-email': { maxCalls: 100, windowMinutes: 60 },
+  'ai-vision': { maxCalls: 15, windowMinutes: 60 },
+  'comp-images': { maxCalls: 20, windowMinutes: 60 },
+  'photo-upload': { maxCalls: 100, windowMinutes: 60 },
 }
 
 export async function checkRateLimit(

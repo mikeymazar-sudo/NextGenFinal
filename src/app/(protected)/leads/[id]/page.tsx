@@ -15,6 +15,7 @@ import { SkipTrace } from '@/components/leads/skip-trace'
 import { PropertyNotes } from '@/components/leads/property-notes'
 import { ActivityTimeline } from '@/components/leads/activity-timeline'
 import { CompsMap } from '@/components/leads/comps-map'
+import { PhotoGallery } from '@/components/leads/photo-gallery'
 import type { Property, Contact, RentalEstimate, SoldEstimate, RentalComp, SoldComp } from '@/types/schema'
 
 // Comps Map Widget Component
@@ -187,6 +188,9 @@ export default function PropertyDetailPage() {
                         }}
                     />
 
+                    {/* Property Photos */}
+                    <PhotoGallery propertyId={property.id} />
+
                     {/* Notes */}
                     <PropertyNotes propertyId={property.id} />
                 </div>
@@ -214,9 +218,17 @@ export default function PropertyDetailPage() {
                     {/* AI Analysis */}
                     <DealAnalysisCard
                         propertyId={property.id}
+                        property={property}
                         existingAnalysis={property.ai_analysis}
                         analyzedAt={property.ai_analyzed_at}
                         hasRentalData={!!property.rental_data}
+                        hasSoldData={!!property.sold_data}
+                        photoCount={0}
+                        transcriptCount={0}
+                        messageCount={0}
+                        onPropertyUpdate={(updates) => {
+                            setProperty((prev) => prev ? { ...prev, ...updates } : prev)
+                        }}
                     />
 
                     {/* Activity Timeline */}

@@ -99,7 +99,7 @@ export function PowerDialerSetupDialog({
         .eq('has_been_answered', false)
 
       if (listId === 'all_new') {
-        query = query.eq('status', 'new')
+        query = query.eq('status', 'new').is('last_called_at', null)
       } else if (listId === 'unanswered') {
         query = query.gt('unanswered_count', 0)
       } else {
@@ -229,8 +229,8 @@ export function PowerDialerSetupDialog({
                     key={idx}
                     onClick={() => setSmsTemplateIndex(idx)}
                     className={`w-full text-left p-2.5 rounded-lg border text-xs transition-colors ${smsTemplateIndex === idx
-                        ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/30 dark:border-blue-700'
-                        : 'border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800/50'
+                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/30 dark:border-blue-700'
+                      : 'border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800/50'
                       }`}
                   >
                     <div className="flex items-center gap-2 mb-1">
