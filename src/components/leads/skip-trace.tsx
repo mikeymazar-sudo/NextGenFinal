@@ -1039,21 +1039,50 @@ export function SkipTrace({ propertyId, ownerName, address, city, state, zip, ex
             <div className="flex gap-2">
               <Select value={selectedEmail} onValueChange={setSelectedEmail}>
                 <SelectTrigger className="flex-1">
-                  <span className="truncate">
-                    {selectedEmail || "Select email"}
-                  </span>
+                  <SelectValue placeholder="Select email">
+                    {selectedEmail && selectedEmail}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {allEmails.map((email, i) => (
-                    <SelectItem key={i} value={email.value}>
-                      <div className="flex items-center gap-2">
-                        <span>{email.value}</span>
-                        {email.is_primary && (
-                          <Badge variant="secondary" className="text-xs px-1 py-0">Primary</Badge>
-                        )}
-                        <Badge variant="outline" className="text-xs px-1 py-0 capitalize">{email.label}</Badge>
-                      </div>
-                    </SelectItem>
+                    <div key={i} className="flex items-center justify-between pr-2">
+                      <SelectItem value={email.value} className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <span>{email.value}</span>
+                          {email.is_primary && (
+                            <Badge variant="secondary" className="text-xs px-1 py-0">Primary</Badge>
+                          )}
+                          <Badge variant="outline" className="text-xs px-1 py-0 capitalize">{email.label}</Badge>
+                        </div>
+                      </SelectItem>
+                      <DropdownMenu modal={false}>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="ghost" size="icon" className="h-6 w-6 ml-2" onPointerDown={(e) => e.stopPropagation()}>
+                            <MoreVertical className="h-3.5 w-3.5" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          {!email.is_primary && (
+                            <DropdownMenuItem onClick={() => handleSetPrimary('email', i)}>
+                              <Star className="mr-2 h-4 w-4" />
+                              Set as Primary
+                            </DropdownMenuItem>
+                          )}
+                          <DropdownMenuItem onClick={() => openEditModal('email', i, email)}>
+                            <Pencil className="mr-2 h-4 w-4" />
+                            Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            onClick={() => handleDelete('email', i)}
+                            className="text-red-600"
+                          >
+                            <Trash2 className="mr-2 h-4 w-4" />
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
                   ))}
                   <DropdownMenuSeparator />
                   <div
@@ -1065,45 +1094,6 @@ export function SkipTrace({ propertyId, ownerName, address, city, state, zip, ex
                   </div>
                 </SelectContent>
               </Select>
-              {/* Actions menu for selected email */}
-              {selectedEmail && (() => {
-                const idx = allEmails.findIndex(e => e.value === selectedEmail)
-                const entry = allEmails[idx]
-                if (!entry) return null
-                return (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="outline" size="icon">
-                        <MoreVertical className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      {!entry.is_primary && (
-                        <DropdownMenuItem onClick={() => handleSetPrimary('email', idx)}>
-                          <Star className="mr-2 h-4 w-4" />
-                          Set as Primary
-                        </DropdownMenuItem>
-                      )}
-                      <DropdownMenuItem onClick={() => openEditModal('email', idx, entry)}>
-                        <Pencil className="mr-2 h-4 w-4" />
-                        Edit
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => openAddModal('email')}>
-                        <Plus className="mr-2 h-4 w-4" />
-                        Add New
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        onClick={() => handleDelete('email', idx)}
-                        className="text-red-600"
-                      >
-                        <Trash2 className="mr-2 h-4 w-4" />
-                        Delete
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )
-              })()}
               <Button
                 variant="outline"
                 size="icon"
@@ -1261,6 +1251,25 @@ export function SkipTrace({ propertyId, ownerName, address, city, state, zip, ex
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        <EmailComposer
+          isOpen={emailComposerOpen}
+          onClose={() => setEmailComposerOpen(false)}
+          initialTo={selectedEmail}
+          allEmails={allEmails.map(e => e.value)}
+          property={{
+            id: propertyId,
+            address,
+            city,
+            state,
+            zip,
+            price: listPrice || null,
+            bedrooms: bedrooms || null,
+            bathrooms: bathrooms || null,
+            sqft: sqft || null,
+            ownerName: contacts[0]?.name || ownerName,
+          }}
+        />
       </Card >
       {normalizedData && <PropertyDataCards d={normalizedData} />}
     </div>
