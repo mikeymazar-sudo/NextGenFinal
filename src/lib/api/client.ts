@@ -295,11 +295,14 @@ class ApiClient {
     template: string,
     propertyId?: string,
     subject?: string,
-    customHtml?: string
+    customHtml?: string,
+    replyTo?: string,
+    message?: string,
+    offerAmount?: number
   ) {
     return this.request<{ sent: boolean; to: string; subject: string }>('/api/email/send', {
       method: 'POST',
-      body: JSON.stringify({ to, template, propertyId, subject, customHtml }),
+      body: JSON.stringify({ to, template, propertyId, subject, customHtml, replyTo, message, offerAmount }),
     })
   }
 }

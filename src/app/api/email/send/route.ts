@@ -1,14 +1,19 @@
 import { NextRequest } from 'next/server'
 import { z } from 'zod'
-import { Resend } from 'resend'
 import { withAuth } from '@/lib/auth/middleware'
 import { checkRateLimit } from '@/lib/api/rate-limit'
 import { apiSuccess, Errors } from '@/lib/api/response'
 import { createAdminClient } from '@/lib/supabase/server'
-
-function getResendClient() {
-  return new Resend(process.env.RESEND_API_KEY)
-}
+import {
+  sendEmailFrom,
+  EMAIL_CONFIG,
+} from '@/lib/email/resend'
+import {
+  propertyDetailsTemplate,
+  followUpTemplate,
+  offerTemplate,
+  baseEmailTemplate,
+} from '@/lib/email/templates'
 
 const SendEmailSchema = z.object({
   to: z.string().email(),
@@ -16,50 +21,10 @@ const SendEmailSchema = z.object({
   propertyId: z.string().uuid().optional(),
   subject: z.string().optional(),
   customHtml: z.string().optional(),
+  replyTo: z.string().email().optional(),
+  message: z.string().optional(),
+  offerAmount: z.number().positive().optional(),
 })
-
-function renderTemplate(
-  template: string,
-  property: Record<string, unknown> | null,
-  senderName: string
-): { subject: string; html: string } {
-  switch (template) {
-    case 'property_details':
-      return {
-        subject: `Property Details: ${property?.address || 'Inquiry'}`,
-        html: `
-          <h2>Property Details</h2>
-          <p><strong>Address:</strong> ${property?.address || 'N/A'}, ${property?.city || ''} ${property?.state || ''} ${property?.zip || ''}</p>
-          <p><strong>Price:</strong> ${property?.list_price ? `$${Number(property.list_price).toLocaleString()}` : 'Contact for pricing'}</p>
-          <p><strong>Beds/Baths:</strong> ${property?.bedrooms || '?'} / ${property?.bathrooms || '?'}</p>
-          <p><strong>Sqft:</strong> ${property?.sqft ? Number(property.sqft).toLocaleString() : 'N/A'}</p>
-          <p>Best regards,<br/>${senderName}</p>
-        `,
-      }
-    case 'follow_up':
-      return {
-        subject: `Following Up - ${property?.address || 'Property Inquiry'}`,
-        html: `
-          <p>Hi,</p>
-          <p>I wanted to follow up regarding the property at <strong>${property?.address || 'the address we discussed'}</strong>.</p>
-          <p>Are you still interested in discussing options? I'd love to chat when you have a moment.</p>
-          <p>Best regards,<br/>${senderName}</p>
-        `,
-      }
-    case 'offer_sent':
-      return {
-        subject: `Offer for ${property?.address || 'Property'}`,
-        html: `
-          <p>Hi,</p>
-          <p>Thank you for considering our offer on the property at <strong>${property?.address || 'the address'}</strong>.</p>
-          <p>Please review the details and let me know if you have any questions.</p>
-          <p>Best regards,<br/>${senderName}</p>
-        `,
-      }
-    default:
-      return { subject: 'Message from NextGen Realty', html: '' }
-  }
-}
 
 export const POST = withAuth(async (req: NextRequest, { user }) => {
   try {
@@ -70,7 +35,16 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
       return Errors.badRequest('Invalid input. Provide to, template, and optionally propertyId.')
     }
 
-    const { to, template, propertyId, subject: customSubject, customHtml } = parsed.data
+    const {
+      to,
+      template,
+      propertyId,
+      subject: customSubject,
+      customHtml,
+      replyTo,
+      message,
+      offerAmount,
+    } = parsed.data
 
     // Rate limit check
     const { allowed } = await checkRateLimit(user.id, 'send-email')
@@ -86,6 +60,7 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
       .single()
 
     const senderName = profile?.full_name || profile?.email || 'NextGen Realty'
+    const agentEmail = replyTo || profile?.email
 
     // Get property if provided
     let property: Record<string, unknown> | null = null
@@ -101,27 +76,76 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
     let emailSubject: string
     let emailHtml: string
 
-    if (template === 'custom' && customHtml) {
+    if (template === 'custom') {
       emailSubject = customSubject || 'Message from NextGen Realty'
-      emailHtml = customHtml
-    } else {
-      const rendered = renderTemplate(template, property, senderName)
+      // Wrap plain HTML in the branded base template if it looks like plain text (no html tag)
+      const rawHtml = customHtml || ''
+      emailHtml = rawHtml.includes('<html') ? rawHtml : baseEmailTemplate(rawHtml)
+    } else if (template === 'property_details' && property) {
+      const rendered = propertyDetailsTemplate(
+        {
+          address: String(property.address || ''),
+          city: property.city ? String(property.city) : undefined,
+          state: property.state ? String(property.state) : undefined,
+          zip: property.zip ? String(property.zip) : undefined,
+          price: property.list_price ? Number(property.list_price) : undefined,
+          bedrooms: property.bedrooms ? Number(property.bedrooms) : undefined,
+          bathrooms: property.bathrooms ? Number(property.bathrooms) : undefined,
+          sqft: property.sqft ? Number(property.sqft) : undefined,
+        },
+        senderName
+      )
       emailSubject = customSubject || rendered.subject
       emailHtml = rendered.html
+    } else if (template === 'follow_up') {
+      const propertyAddress = property
+        ? String(property.address || '')
+        : 'the property we discussed'
+      const ownerName = property?.owner_name ? String(property.owner_name) : null
+      const rendered = followUpTemplate(
+        propertyAddress,
+        ownerName,
+        message || 'I wanted to follow up and see if you had any questions.',
+        senderName
+      )
+      emailSubject = customSubject || rendered.subject
+      emailHtml = rendered.html
+    } else if (template === 'offer_sent' && property) {
+      const ownerName = property?.owner_name ? String(property.owner_name) : null
+      const rendered = offerTemplate(
+        {
+          address: String(property.address || ''),
+          city: property.city ? String(property.city) : undefined,
+          state: property.state ? String(property.state) : undefined,
+          zip: property.zip ? String(property.zip) : undefined,
+          price: property.list_price ? Number(property.list_price) : undefined,
+          bedrooms: property.bedrooms ? Number(property.bedrooms) : undefined,
+          bathrooms: property.bathrooms ? Number(property.bathrooms) : undefined,
+          sqft: property.sqft ? Number(property.sqft) : undefined,
+        },
+        offerAmount || 0,
+        ownerName,
+        senderName,
+        message || undefined
+      )
+      emailSubject = customSubject || rendered.subject
+      emailHtml = rendered.html
+    } else {
+      // Fallback: send a basic branded email with whatever we have
+      emailSubject = customSubject || 'Message from NextGen Realty'
+      emailHtml = baseEmailTemplate(customHtml || message || '')
     }
 
-    const domain = process.env.RESEND_DOMAIN || 'nextgenrealty.com'
-
-    const { error: sendError } = await getResendClient().emails.send({
-      from: `${senderName} <noreply@${domain}>`,
+    const result = await sendEmailFrom(senderName, {
       to,
       subject: emailSubject,
       html: emailHtml,
+      ...(agentEmail && { replyTo: agentEmail }),
     })
 
-    if (sendError) {
-      console.error('Resend error:', sendError)
-      return Errors.externalApi('Email service', sendError)
+    if (!result.success) {
+      console.error('Resend error:', result.error)
+      return Errors.externalApi('Email service', result.error)
     }
 
     // Log to communication_logs

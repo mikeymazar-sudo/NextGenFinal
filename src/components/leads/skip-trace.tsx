@@ -55,7 +55,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible'
-import { api } from '@/lib/api/client'
+import { api } from '@/lib/api-client'
 import { createClient } from '@/lib/supabase/client'
 import { EmailComposer } from './email-composer'
 import { format } from 'date-fns'
@@ -66,7 +66,7 @@ import {
   fmtCurrency,
   fmtDate,
   type NormalizedPropertyData,
-} from '@/lib/property/data-utils'
+} from '@/lib/property-data-utils'
 import {
   WholesaleIndicators,
   FinancialOverview,
@@ -103,7 +103,7 @@ interface SkipTraceProps {
 // Helper to normalize phone/email entries (handles both old string[] and new object[] formats)
 function normalizePhoneEntries(phones: PhoneEntry[] | string[]): PhoneEntry[] {
   if (!phones || phones.length === 0) return []
-  const entries = phones.map((p, i) => {
+  return phones.map((p, i) => {
     let entry: PhoneEntry
 
     if (typeof p === 'string') {
@@ -141,8 +141,6 @@ function normalizePhoneEntries(phones: PhoneEntry[] | string[]): PhoneEntry[] {
 
     return entry
   })
-
-  return entries
 }
 
 function normalizeEmailEntries(emails: EmailEntry[] | string[]): EmailEntry[] {
@@ -627,19 +625,8 @@ export function SkipTrace({ propertyId, ownerName, address, city, state, zip, ex
     setSaving(false)
   }
 
-  const handleSetPrimary = async (type: 'phone' | 'email', value: string) => {
+  const handleSetPrimary = async (type: 'phone' | 'email', index: number) => {
     if (!contactId) return
-
-    // Find the correct DB index from the unsorted contact data (allPhones is sorted, so we can't use visual index)
-    const contact = contacts[0]
-    const rawEntries = type === 'phone'
-      ? normalizePhoneEntries((contact?.phone_numbers || []) as any[])
-      : normalizeEmailEntries((contact?.emails || []) as any[])
-    const index = rawEntries.findIndex(e => e.value === value)
-    if (index === -1) {
-      toast.error('Could not find entry to update')
-      return
-    }
 
     const result = await api.updateContact(contactId, type, index, { is_primary: true })
 
@@ -693,8 +680,211 @@ export function SkipTrace({ propertyId, ownerName, address, city, state, zip, ex
   const isCorporateOwned = normalizedData?.corporateOwned || false
   const isOwnerOccupied = normalizedData?.ownerOccupied || false
 
+  // No contacts yet - show search prompt
+  if (contacts.length === 0) {
+    return (
+      <div className="space-y-6">
+        <Card className="shadow-sm">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center">
+                  <User className="h-4 w-4 text-muted-foreground" />
+                </div>
+                <div>
+                  <CardTitle className="text-base">Owner Info</CardTitle>
+                  <div className="text-xs text-muted-foreground">
+                    <p className="font-medium text-foreground">{displayOwnerName}</p>
+                    <div className="flex items-center gap-1 mt-0.5">
+                      <MapPin className="h-3 w-3" />
+                      <span>{address}, {city}, {state} {zip}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-3 pt-3 border-t">
+              <h1 className="text-xl font-bold">{displayOwnerName}</h1>
+              {displayOwner2Name && (
+                <p className="text-sm text-muted-foreground">{displayOwner2Name}</p>
+              )}
+              {/* Owner flags */}
+              {normalizedData && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {isAbsenteeOwner && <Badge variant="secondary" className="text-xs">Absentee Owner</Badge>}
+                  {isCorporateOwned && <Badge variant="secondary" className="text-xs">Corporate Owned</Badge>}
+                  {isOwnerOccupied && <Badge variant="secondary" className="text-xs">Owner Occupied</Badge>}
+                </div>
+              )}
+              {/* Mailing address from RealEstateAPI */}
+              {displayMailingAddress && (
+                <div className="flex items-start gap-1.5 mt-2 text-sm text-muted-foreground">
+                  <MapPin className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+                  <span>{displayMailingAddress}</span>
+                </div>
+              )}
+
+              {/* Quick stats: bed/bath/sqft, last sale, tax, estimated value */}
+              <OwnerQuickStats d={normalizedData} bedrooms={bedrooms} bathrooms={bathrooms} sqft={sqft} />
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Skip Trace section */}
+            <div className="text-center space-y-4 py-4 border-t">
+              <div className="mx-auto w-12 h-12 rounded-full bg-indigo-100 dark:bg-indigo-900/30 flex items-center justify-center">
+                <UserSearch className="h-6 w-6 text-indigo-600 dark:text-indigo-400" />
+              </div>
+              <div>
+                <h3 className="font-semibold">Skip Trace Owner</h3>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Find phone numbers, emails, and mailing address
+                </p>
+              </div>
+              <div className="flex flex-col gap-2">
+                <Button
+                  onClick={() => runSkipTrace()}
+                  className="bg-indigo-600 hover:bg-indigo-700"
+                  disabled={loading}
+                >
+                  {loading ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <UserSearch className="mr-2 h-4 w-4" />
+                  )}
+                  {loading ? 'Searching...' : 'Run Skip Trace'}
+                </Button>
+                <div className="flex gap-2">
+                  <Button
+                    onClick={() => openAddModal('phone')}
+                    variant="outline"
+                    size="sm"
+                    className="flex-1"
+                  >
+                    <Plus className="mr-1.5 h-3.5 w-3.5" />
+                    Add Phone
+                  </Button>
+                  <Button
+                    onClick={() => openAddModal('email')}
+                    variant="outline"
+                    size="sm"
+                    className="flex-1"
+                  >
+                    <Plus className="mr-1.5 h-3.5 w-3.5" />
+                    Add Email
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            {/* Fetch Property Data section */}
+            {!normalizedData && (
+              <div className="text-center space-y-4 py-4 border-t">
+                <div className="mx-auto w-12 h-12 rounded-full bg-emerald-100 dark:bg-emerald-900/30 flex items-center justify-center">
+                  <Database className="h-6 w-6 text-emerald-600 dark:text-emerald-400" />
+                </div>
+                <div>
+                  <h3 className="font-semibold">Fetch Property Data</h3>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    Pull financials, sale history, tax info, and more
+                  </p>
+                </div>
+                <Button
+                  onClick={fetchPropertyData}
+                  disabled={fetchingPropertyData}
+                  className="bg-emerald-600 hover:bg-emerald-700"
+                >
+                  {fetchingPropertyData ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Database className="mr-2 h-4 w-4" />
+                  )}
+                  {fetchingPropertyData ? 'Fetching...' : 'Fetch Property Data'}
+                </Button>
+              </div>
+            )}
+            {normalizedData && !fetchingPropertyData && (
+              <div className="pt-2 border-t">
+                <Button
+                  onClick={fetchPropertyData}
+                  variant="ghost"
+                  size="sm"
+                  className="w-full h-8 text-xs"
+                >
+                  <RefreshCw className="mr-1.5 h-3 w-3" />
+                  Refresh Property Data
+                </Button>
+              </div>
+            )}
+          </CardContent>
+
+          {/* Add/Edit Modal */}
+          <Dialog open={addModalOpen} onOpenChange={setAddModalOpen}>
+            <DialogContent className="sm:max-w-md">
+              <DialogHeader>
+                <DialogTitle>
+                  {editIndex !== null ? 'Edit' : 'Add'} {addModalType === 'phone' ? 'Phone Number' : 'Email Address'}
+                </DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4 py-4">
+                <Input
+                  placeholder={addModalType === 'phone' ? 'Enter phone number' : 'Enter email address'}
+                  value={addValue}
+                  onChange={(e) => setAddValue(e.target.value)}
+                />
+                <Select value={addLabel} onValueChange={setAddLabel}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(addModalType === 'phone' ? phoneLabels : emailLabels).map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setAddModalOpen(false)}>
+                  Cancel
+                </Button>
+                <Button onClick={handleSaveContact} disabled={saving}>
+                  {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {editIndex !== null ? 'Save' : 'Add'}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+
+          <EmailComposer
+            isOpen={emailComposerOpen}
+            onClose={() => setEmailComposerOpen(false)}
+            initialTo={selectedEmail}
+            allEmails={allEmails.map(e => e.value)}
+            property={{
+              id: propertyId,
+              address,
+              city,
+              state,
+              zip,
+              price: listPrice || null,
+              bedrooms: bedrooms || null,
+              bathrooms: bathrooms || null,
+              sqft: sqft || null,
+              ownerName: contacts[0]?.name || ownerName,
+            }}
+          />
+        </Card>
+        {normalizedData && <PropertyDataCards d={normalizedData} />}
+      </div>
+    )
+  }
+
+
+
+  // Has contacts - show results
   const contactOwnerName = contacts[0]?.name || displayOwnerName
-  const hasAnyContactData = allPhones.length > 0 || allEmails.length > 0
 
   return (
     <div className="space-y-6">
@@ -702,15 +892,8 @@ export function SkipTrace({ propertyId, ownerName, address, city, state, zip, ex
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                hasAnyContactData
-                  ? 'bg-green-100 dark:bg-green-900/30'
-                  : 'bg-zinc-100 dark:bg-zinc-800'
-              }`}>
-                {hasAnyContactData
-                  ? <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400" />
-                  : <User className="h-4 w-4 text-muted-foreground" />
-                }
+              <div className="w-8 h-8 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center">
+                <CheckCircle2 className="h-4 w-4 text-green-600 dark:text-green-400" />
               </div>
               <div>
                 <CardTitle className="text-base">Owner Info</CardTitle>
@@ -723,30 +906,15 @@ export function SkipTrace({ propertyId, ownerName, address, city, state, zip, ex
                 </div>
               </div>
             </div>
-            {/* Skip trace button - always visible */}
             <Button
-              onClick={() => runSkipTrace(hasAnyContactData ? true : undefined)}
-              variant={hasAnyContactData ? 'ghost' : 'default'}
+              onClick={() => runSkipTrace(true)}
+              variant="ghost"
               size="sm"
-              className={hasAnyContactData
-                ? 'h-8 px-2 text-xs'
-                : 'h-8 px-3 text-xs bg-indigo-600 hover:bg-indigo-700'
-              }
+              className="h-8 px-2 text-xs"
               disabled={loading}
             >
-              {loading ? (
-                <Loader2 className="mr-1.5 h-3 w-3 animate-spin" />
-              ) : hasAnyContactData ? (
-                <RefreshCw className="mr-1.5 h-3 w-3" />
-              ) : (
-                <UserSearch className="mr-1.5 h-3 w-3" />
-              )}
-              {loading
-                ? 'Searching...'
-                : hasAnyContactData
-                  ? 'Refresh'
-                  : 'Skip Trace'
-              }
+              <RefreshCw className={`mr-1.5 h-3 w-3 ${loading ? 'animate-spin' : ''}`} />
+              Refresh
             </Button>
           </div>
 
@@ -776,164 +944,51 @@ export function SkipTrace({ propertyId, ownerName, address, city, state, zip, ex
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
-          {/* Phone Number Section */}
+          {/* Phone Number Dropdown */}
           <div className="space-y-2">
             <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
               <Phone className="h-3.5 w-3.5" />
               Phone Numbers ({allPhones.length})
             </label>
-
-            {allPhones.length > 0 ? (
-              <>
-                <div className="flex gap-2">
-                  <Select value={selectedPhone} onValueChange={setSelectedPhone}>
-                    <SelectTrigger className="flex-1">
-                      <SelectValue placeholder="Select phone number">
-                        {selectedPhone && formatPhone(selectedPhone)}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {allPhones.map((phone, i) => (
-                        <div key={i} className="flex items-center justify-between pr-2">
-                          <SelectItem value={phone.value} className="flex-1">
-                            <div className="flex items-center gap-2">
-                              <span>{formatPhone(phone.value)}</span>
-                              {phone.is_primary && (
-                                <Badge variant="secondary" className="text-xs px-1 py-0">Primary</Badge>
-                              )}
-                              <Badge variant="outline" className="text-xs px-1 py-0 capitalize">{phone.label}</Badge>
-                            </div>
-                          </SelectItem>
-                          <DropdownMenu modal={false}>
-                            <DropdownMenuTrigger asChild>
-                              <Button variant="ghost" size="icon" className="h-6 w-6 ml-2" onPointerDown={(e) => e.stopPropagation()}>
-                                <MoreVertical className="h-3.5 w-3.5" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end">
-                              {!phone.is_primary && (
-                                <DropdownMenuItem onClick={() => handleSetPrimary('phone', phone.value)}>
-                                  <Star className="mr-2 h-4 w-4" />
-                                  Set as Primary
-                                </DropdownMenuItem>
-                              )}
-                              <DropdownMenuItem onClick={() => openEditModal('phone', i, phone)}>
-                                <Pencil className="mr-2 h-4 w-4" />
-                                Edit
-                              </DropdownMenuItem>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                onClick={() => handleDelete('phone', i)}
-                                className="text-red-600"
-                              >
-                                <Trash2 className="mr-2 h-4 w-4" />
-                                Delete
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
+            <div className="flex gap-2">
+              <Select value={selectedPhone} onValueChange={setSelectedPhone}>
+                <SelectTrigger className="flex-1">
+                  <SelectValue placeholder="Select phone number">
+                    {selectedPhone && formatPhone(selectedPhone)}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {allPhones.map((phone, i) => (
+                    <div key={i} className="flex items-center justify-between pr-2">
+                      <SelectItem value={phone.value} className="flex-1">
+                        <div className="flex items-center gap-2">
+                          <span>{formatPhone(phone.value)}</span>
+                          {phone.is_primary && (
+                            <Badge variant="secondary" className="text-xs px-1 py-0">Primary</Badge>
+                          )}
+                          <Badge variant="outline" className="text-xs px-1 py-0 capitalize">{phone.label}</Badge>
                         </div>
-                      ))}
-                      <DropdownMenuSeparator />
-                      <div
-                        className="flex items-center gap-2 px-2 py-1.5 text-sm cursor-pointer hover:bg-accent rounded-sm"
-                        onClick={() => openAddModal('phone')}
-                      >
-                        <Plus className="h-4 w-4" />
-                        Add Phone Number
-                      </div>
-                    </SelectContent>
-                  </Select>
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={() => copyToClipboard(selectedPhone, 'Phone')}
-                    disabled={!selectedPhone}
-                  >
-                    <Copy className="h-4 w-4" />
-                  </Button>
-                </div>
-                {/* Call Button */}
-                {selectedPhone && (
-                  <Button
-                    className="w-full bg-green-600 hover:bg-green-700"
-                    onClick={() => handleCall(selectedPhone)}
-                  >
-                    <Phone className="mr-2 h-4 w-4" />
-                    Call {formatPhone(selectedPhone)}
-                  </Button>
-                )}
-              </>
-            ) : (
-              <div className="flex items-center justify-between bg-zinc-50 dark:bg-zinc-800/50 rounded-lg px-3 py-2.5">
-                <p className="text-sm text-muted-foreground">No phone numbers yet</p>
-                <Button onClick={() => openAddModal('phone')} variant="outline" size="sm">
-                  <Plus className="mr-1.5 h-3.5 w-3.5" />
-                  Add Phone
-                </Button>
-              </div>
-            )}
-          </div>
-
-          {/* Email Section */}
-          <div className="space-y-2">
-            <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
-              <Mail className="h-3.5 w-3.5" />
-              Email Addresses ({allEmails.length})
-            </label>
-
-            {allEmails.length > 0 ? (
-              <>
-                <div className="flex gap-2">
-                  <Select value={selectedEmail} onValueChange={setSelectedEmail}>
-                    <SelectTrigger className="flex-1">
-                      <span className="truncate">
-                        {selectedEmail || "Select email"}
-                      </span>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {allEmails.map((email, i) => (
-                        <SelectItem key={i} value={email.value}>
-                          <div className="flex items-center gap-2">
-                            <span>{email.value}</span>
-                            {email.is_primary && (
-                              <Badge variant="secondary" className="text-xs px-1 py-0">Primary</Badge>
-                            )}
-                            <Badge variant="outline" className="text-xs px-1 py-0 capitalize">{email.label}</Badge>
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {/* Actions menu for selected email */}
-                  {selectedEmail && (() => {
-                    const idx = allEmails.findIndex(e => e.value === selectedEmail)
-                    const entry = allEmails[idx]
-                    if (!entry) return null
-                    return (
-                      <DropdownMenu>
+                      </SelectItem>
+                      <DropdownMenu modal={false}>
                         <DropdownMenuTrigger asChild>
-                          <Button variant="outline" size="icon">
-                            <MoreVertical className="h-4 w-4" />
+                          <Button variant="ghost" size="icon" className="h-6 w-6 ml-2" onPointerDown={(e) => e.stopPropagation()}>
+                            <MoreVertical className="h-3.5 w-3.5" />
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          {!entry.is_primary && (
-                            <DropdownMenuItem onClick={() => handleSetPrimary('email', entry.value)}>
+                          {!phone.is_primary && (
+                            <DropdownMenuItem onClick={() => handleSetPrimary('phone', i)}>
                               <Star className="mr-2 h-4 w-4" />
                               Set as Primary
                             </DropdownMenuItem>
                           )}
-                          <DropdownMenuItem onClick={() => openEditModal('email', idx, entry)}>
+                          <DropdownMenuItem onClick={() => openEditModal('phone', i, phone)}>
                             <Pencil className="mr-2 h-4 w-4" />
                             Edit
                           </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => openAddModal('email')}>
-                            <Plus className="mr-2 h-4 w-4" />
-                            Add New
-                          </DropdownMenuItem>
                           <DropdownMenuSeparator />
                           <DropdownMenuItem
-                            onClick={() => handleDelete('email', idx)}
+                            onClick={() => handleDelete('phone', i)}
                             className="text-red-600"
                           >
                             <Trash2 className="mr-2 h-4 w-4" />
@@ -941,42 +996,138 @@ export function SkipTrace({ propertyId, ownerName, address, city, state, zip, ex
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
-                    )
-                  })()}
-                  <Button
-                    variant="outline"
-                    size="icon"
-                    onClick={() => copyToClipboard(selectedEmail, 'Email')}
-                    disabled={!selectedEmail}
+                    </div>
+                  ))}
+                  <DropdownMenuSeparator />
+                  <div
+                    className="flex items-center gap-2 px-2 py-1.5 text-sm cursor-pointer hover:bg-accent rounded-sm"
+                    onClick={() => openAddModal('phone')}
                   >
-                    <Copy className="h-4 w-4" />
-                  </Button>
-                </div>
-                {/* Email Button */}
-                {selectedEmail && (
-                  <div className="space-y-1">
-                    <Button
-                      className="w-full bg-blue-600 hover:bg-blue-700"
-                      onClick={() => setEmailComposerOpen(true)}
-                    >
-                      <Mail className="mr-2 h-4 w-4" />
-                      Email {selectedEmail}
-                    </Button>
-                    {lastEmailed && (
-                      <p className="text-[10px] text-center text-muted-foreground">
-                        Last emailed: {format(new Date(lastEmailed), 'MMM d, yyyy')}
-                      </p>
-                    )}
+                    <Plus className="h-4 w-4" />
+                    Add Phone Number
                   </div>
-                )}
-              </>
-            ) : (
-              <div className="flex items-center justify-between bg-zinc-50 dark:bg-zinc-800/50 rounded-lg px-3 py-2.5">
-                <p className="text-sm text-muted-foreground">No email addresses yet</p>
-                <Button onClick={() => openAddModal('email')} variant="outline" size="sm">
-                  <Plus className="mr-1.5 h-3.5 w-3.5" />
-                  Add Email
+                </SelectContent>
+              </Select>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => copyToClipboard(selectedPhone, 'Phone')}
+                disabled={!selectedPhone}
+              >
+                <Copy className="h-4 w-4" />
+              </Button>
+            </div>
+            {/* Call Button */}
+            {selectedPhone && (
+              <Button
+                className="w-full bg-green-600 hover:bg-green-700"
+                onClick={() => handleCall(selectedPhone)}
+              >
+                <Phone className="mr-2 h-4 w-4" />
+                Call {formatPhone(selectedPhone)}
+              </Button>
+            )}
+
+          </div>
+
+          {/* Email Dropdown */}
+          <div className="space-y-2">
+            <label className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
+              <Mail className="h-3.5 w-3.5" />
+              Email Addresses ({allEmails.length})
+            </label>
+            <div className="flex gap-2">
+              <Select value={selectedEmail} onValueChange={setSelectedEmail}>
+                <SelectTrigger className="flex-1">
+                  <span className="truncate">
+                    {selectedEmail || "Select email"}
+                  </span>
+                </SelectTrigger>
+                <SelectContent>
+                  {allEmails.map((email, i) => (
+                    <SelectItem key={i} value={email.value}>
+                      <div className="flex items-center gap-2">
+                        <span>{email.value}</span>
+                        {email.is_primary && (
+                          <Badge variant="secondary" className="text-xs px-1 py-0">Primary</Badge>
+                        )}
+                        <Badge variant="outline" className="text-xs px-1 py-0 capitalize">{email.label}</Badge>
+                      </div>
+                    </SelectItem>
+                  ))}
+                  <DropdownMenuSeparator />
+                  <div
+                    className="flex items-center gap-2 px-2 py-1.5 text-sm cursor-pointer hover:bg-accent rounded-sm"
+                    onClick={() => openAddModal('email')}
+                  >
+                    <Plus className="h-4 w-4" />
+                    Add Email Address
+                  </div>
+                </SelectContent>
+              </Select>
+              {/* Actions menu for selected email */}
+              {selectedEmail && (() => {
+                const idx = allEmails.findIndex(e => e.value === selectedEmail)
+                const entry = allEmails[idx]
+                if (!entry) return null
+                return (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="icon">
+                        <MoreVertical className="h-4 w-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      {!entry.is_primary && (
+                        <DropdownMenuItem onClick={() => handleSetPrimary('email', idx)}>
+                          <Star className="mr-2 h-4 w-4" />
+                          Set as Primary
+                        </DropdownMenuItem>
+                      )}
+                      <DropdownMenuItem onClick={() => openEditModal('email', idx, entry)}>
+                        <Pencil className="mr-2 h-4 w-4" />
+                        Edit
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => openAddModal('email')}>
+                        <Plus className="mr-2 h-4 w-4" />
+                        Add New
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onClick={() => handleDelete('email', idx)}
+                        className="text-red-600"
+                      >
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        Delete
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )
+              })()}
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => copyToClipboard(selectedEmail, 'Email')}
+                disabled={!selectedEmail}
+              >
+                <Copy className="h-4 w-4" />
+              </Button>
+            </div>
+            {/* Email Button */}
+            {selectedEmail && (
+              <div className="space-y-1">
+                <Button
+                  className="w-full bg-blue-600 hover:bg-blue-700"
+                  onClick={() => setEmailComposerOpen(true)}
+                >
+                  <Mail className="mr-2 h-4 w-4" />
+                  Email {selectedEmail}
                 </Button>
+                {lastEmailed && (
+                  <p className="text-[10px] text-center text-muted-foreground">
+                    Last emailed: {format(new Date(lastEmailed), 'MMM d, yyyy')}
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -1043,6 +1194,33 @@ export function SkipTrace({ propertyId, ownerName, address, city, state, zip, ex
               </Button>
             </div>
           )}
+
+          {/* Show message if no data */}
+          {allPhones.length === 0 && allEmails.length === 0 && (
+            <div className="text-center py-4 space-y-3">
+              <p className="text-xs text-muted-foreground">
+                No contact information found
+              </p>
+              <div className="flex gap-2 justify-center">
+                <Button
+                  onClick={() => openAddModal('phone')}
+                  variant="outline"
+                  size="sm"
+                >
+                  <Plus className="mr-1.5 h-3.5 w-3.5" />
+                  Add Phone
+                </Button>
+                <Button
+                  onClick={() => openAddModal('email')}
+                  variant="outline"
+                  size="sm"
+                >
+                  <Plus className="mr-1.5 h-3.5 w-3.5" />
+                  Add Email
+                </Button>
+              </div>
+            </div>
+          )}
         </CardContent>
 
         {/* Add/Edit Modal */}
@@ -1083,25 +1261,7 @@ export function SkipTrace({ propertyId, ownerName, address, city, state, zip, ex
             </DialogFooter>
           </DialogContent>
         </Dialog>
-
-        <EmailComposer
-          isOpen={emailComposerOpen}
-          onClose={() => setEmailComposerOpen(false)}
-          initialTo={selectedEmail}
-          property={{
-            id: propertyId,
-            address,
-            city,
-            state,
-            zip,
-            price: listPrice || null,
-            bedrooms: bedrooms || null,
-            bathrooms: bathrooms || null,
-            sqft: sqft || null,
-            ownerName: contacts[0]?.name || ownerName,
-          }}
-        />
-      </Card>
+      </Card >
       {normalizedData && <PropertyDataCards d={normalizedData} />}
     </div>
   )
