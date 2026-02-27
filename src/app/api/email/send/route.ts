@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server'
 import { z } from 'zod'
 import { withAuth } from '@/lib/auth/middleware'
 import { checkRateLimit } from '@/lib/api/rate-limit'
-import { apiSuccess, Errors } from '@/lib/api/response'
+import { apiError, apiSuccess, Errors } from '@/lib/api/response'
 import { createAdminClient } from '@/lib/supabase/server'
 import {
   sendEmailFrom,
@@ -145,7 +145,14 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
 
     if (!result.success) {
       console.error('Resend error:', result.error)
-      return Errors.externalApi('Email service', result.error)
+      // Surface the actual Resend error message so the user knows what went wrong
+      const resendMsg =
+        typeof result.error === 'object' && result.error !== null && 'message' in result.error
+          ? String((result.error as { message: unknown }).message)
+          : typeof result.error === 'string'
+          ? result.error
+          : 'Email service unavailable. Check your Resend API key and domain configuration.'
+      return apiError(resendMsg, 'EXTERNAL_API_ERROR', 502, result.error)
     }
 
     // Log to communication_logs

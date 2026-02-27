@@ -275,7 +275,7 @@ export function EmailComposer({ isOpen, onClose, initialTo, allEmails = [], repl
                                 <SelectTrigger className="h-7 text-xs border-zinc-200 dark:border-zinc-800 w-full">
                                     <SelectValue />
                                 </SelectTrigger>
-                                <SelectContent>
+                                <SelectContent className="z-[200]">
                                     {templates.map((t) => (
                                         <SelectItem key={t.value} value={t.value} className="text-xs">
                                             <div className="flex flex-col">
@@ -317,7 +317,7 @@ export function EmailComposer({ isOpen, onClose, initialTo, allEmails = [], repl
                                             <SelectTrigger className="h-7 text-xs border-zinc-200 dark:border-zinc-800 w-full">
                                                 <SelectValue placeholder="Select email" />
                                             </SelectTrigger>
-                                            <SelectContent>
+                                            <SelectContent className="z-[200]">
                                                 {allEmails.map((email) => (
                                                     <SelectItem key={email} value={email} className="text-xs font-mono">
                                                         {email}
