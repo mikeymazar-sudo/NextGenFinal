@@ -9,12 +9,12 @@ function getResendClient(): Resend {
   return _resend
 }
 
-// Email configuration
+// Email configuration — read domain at call time so env changes are picked up after restarts
 export const EMAIL_CONFIG = {
-  domain: process.env.RESEND_DOMAIN || 'onboarding.resend.dev',
+  get domain() { return process.env.RESEND_DOMAIN || 'onboarding.resend.dev' },
   from: {
     name: 'NextGen Realty',
-    default: `NextGen Realty <noreply@${process.env.RESEND_DOMAIN || 'onboarding.resend.dev'}>`,
+    get default() { return `NextGen Realty <noreply@${process.env.RESEND_DOMAIN || 'onboarding.resend.dev'}>` },
   },
 }
 
