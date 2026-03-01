@@ -1,46 +1,32 @@
 /**
  * Email template utilities for NextGen Realty
- * These templates use inline CSS for better email client compatibility
+ * These templates use inline CSS for better email client compatibility.
+ * Design goal: clean, personal emails — no marketing banners or branded headers.
  */
 
-// Base email layout with professional styling
-export function baseEmailTemplate(content: string): string {
+// Base email layout — minimal white background, no header/footer branding
+export function baseEmailTemplate(content: string, senderName?: string): string {
   return `
 <!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>NextGen Realty</title>
 </head>
-<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f5f5f5;">
-  <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="background-color: #f5f5f5;">
+<body style="margin: 0; padding: 0; background-color: #ffffff; font-family: Arial, 'Helvetica Neue', Helvetica, sans-serif;">
+  <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
     <tr>
-      <td style="padding: 40px 20px;">
-        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="max-width: 600px; margin: 0 auto; background-color: #ffffff; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-          <!-- Header -->
+      <td align="center">
+        <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="600" style="max-width: 600px;">
           <tr>
-            <td style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 30px; text-align: center; border-radius: 8px 8px 0 0;">
-              <h1 style="margin: 0; color: #ffffff; font-size: 28px; font-weight: 700;">NextGen Realty</h1>
-            </td>
-          </tr>
-
-          <!-- Content -->
-          <tr>
-            <td style="padding: 40px 30px;">
+            <td style="padding: 40px 24px 24px;">
               ${content}
             </td>
           </tr>
-
-          <!-- Footer -->
           <tr>
-            <td style="padding: 30px; text-align: center; background-color: #f9fafb; border-radius: 0 0 8px 8px; border-top: 1px solid #e5e7eb;">
-              <p style="margin: 0 0 10px; color: #6b7280; font-size: 14px;">
-                © ${new Date().getFullYear()} NextGen Realty. All rights reserved.
-              </p>
-              <p style="margin: 0; color: #9ca3af; font-size: 12px;">
-                This email was sent by NextGen Realty
-              </p>
+            <td style="padding: 0 24px 40px;">
+              <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 0 0 12px;">
+              ${senderName ? `<p style="margin: 0; color: #9ca3af; font-size: 12px; font-family: Arial, sans-serif;">${senderName} &middot; NextGen Realty</p>` : ''}
             </td>
           </tr>
         </table>
@@ -85,40 +71,39 @@ export function propertyDetailsTemplate(
       Hello,
     </p>
 
-    ${property.imageUrl ? `<img src="${property.imageUrl}" alt="${property.address}" style="width: 100%; max-width: 600px; height: auto; border-radius: 8px; margin-bottom: 20px;">` : ''}
+    ${property.imageUrl ? `<img src="${property.imageUrl}" alt="${property.address}" style="width: 100%; max-width: 552px; height: auto; border-radius: 6px; margin-bottom: 20px;">` : ''}
 
-    <h2 style="margin: 0 0 20px; color: #111827; font-size: 24px; font-weight: 600;">
+    <h2 style="margin: 0 0 20px; color: #111827; font-size: 22px; font-weight: 600;">
       ${property.address}
     </h2>
 
-    <div style="background-color: #f9fafb; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+    <div style="background-color: #f9fafb; padding: 18px; border-radius: 6px; margin-bottom: 20px; border: 1px solid #e5e7eb;">
       <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
         <tr>
-          <td style="padding: 8px 0;">
+          <td style="padding: 6px 0;">
             <strong style="color: #374151;">Address:</strong>
-            <span style="color: #6b7280;">${fullAddress}</span>
+            <span style="color: #6b7280; margin-left: 8px;">${fullAddress}</span>
           </td>
         </tr>
-        ${property.price ? `<tr><td style="padding: 8px 0;"><strong style="color: #374151;">Price:</strong> <span style="color: #059669; font-size: 18px; font-weight: 600;">$${property.price.toLocaleString()}</span></td></tr>` : ''}
-        ${property.bedrooms || property.bathrooms ? `<tr><td style="padding: 8px 0;"><strong style="color: #374151;">Beds/Baths:</strong> <span style="color: #6b7280;">${property.bedrooms || '?'} bed / ${property.bathrooms || '?'} bath</span></td></tr>` : ''}
-        ${property.sqft ? `<tr><td style="padding: 8px 0;"><strong style="color: #374151;">Square Feet:</strong> <span style="color: #6b7280;">${property.sqft.toLocaleString()} sqft</span></td></tr>` : ''}
+        ${property.price ? `<tr><td style="padding: 6px 0;"><strong style="color: #374151;">Price:</strong> <span style="color: #059669; font-size: 17px; font-weight: 600; margin-left: 8px;">$${property.price.toLocaleString()}</span></td></tr>` : ''}
+        ${property.bedrooms || property.bathrooms ? `<tr><td style="padding: 6px 0;"><strong style="color: #374151;">Beds / Baths:</strong> <span style="color: #6b7280; margin-left: 8px;">${property.bedrooms || '?'} bed / ${property.bathrooms || '?'} bath</span></td></tr>` : ''}
+        ${property.sqft ? `<tr><td style="padding: 6px 0;"><strong style="color: #374151;">Square Feet:</strong> <span style="color: #6b7280; margin-left: 8px;">${property.sqft.toLocaleString()} sqft</span></td></tr>` : ''}
       </table>
     </div>
 
     ${property.description ? `<p style="margin: 0 0 20px; color: #4b5563; font-size: 15px; line-height: 1.6;">${property.description}</p>` : ''}
 
-    ${property.propertyUrl ? `<a href="${property.propertyUrl}" style="display: inline-block; padding: 12px 24px; background-color: #667eea; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 600; margin: 10px 0 20px;">View Property Details</a>` : ''}
+    ${property.propertyUrl ? `<a href="${property.propertyUrl}" style="display: inline-block; padding: 10px 20px; background-color: #2563eb; color: #ffffff; text-decoration: none; border-radius: 5px; font-weight: 600; font-size: 14px; margin: 10px 0 20px;">View Property Details</a>` : ''}
 
-    <p style="margin: 20px 0 0; color: #6b7280; font-size: 15px; line-height: 1.5;">
+    <p style="margin: 24px 0 0; color: #374151; font-size: 15px; line-height: 1.6;">
       Best regards,<br>
-      <strong style="color: #111827;">${senderName}</strong><br>
-      <span style="color: #9ca3af;">NextGen Realty</span>
+      <strong style="color: #111827;">${senderName}</strong>
     </p>
   `
 
   return {
     subject: `Property Details: ${property.address}`,
-    html: baseEmailTemplate(content),
+    html: baseEmailTemplate(content, senderName),
   }
 }
 
@@ -134,30 +119,27 @@ export function followUpTemplate(
       ${recipientName ? `Hi ${recipientName},` : 'Hello,'}
     </p>
 
-    <p style="margin: 0 0 20px; color: #4b5563; font-size: 15px; line-height: 1.6;">
-      I wanted to follow up regarding the property at <strong style="color: #111827;">${propertyAddress}</strong>.
+    <p style="margin: 0 0 20px; color: #374151; font-size: 15px; line-height: 1.7;">
+      I wanted to follow up regarding the property at <strong>${propertyAddress}</strong>.
     </p>
 
-    <div style="background-color: #eff6ff; border-left: 4px solid #3b82f6; padding: 16px; margin: 20px 0; border-radius: 4px;">
-      <p style="margin: 0; color: #1e3a8a; font-size: 15px; line-height: 1.6;">
-        ${message}
-      </p>
-    </div>
-
-    <p style="margin: 20px 0; color: #4b5563; font-size: 15px; line-height: 1.6;">
-      I'd love to discuss this further when you have a moment. Feel free to reply to this email or give me a call.
+    <p style="margin: 0 0 20px; color: #374151; font-size: 15px; line-height: 1.7;">
+      ${message}
     </p>
 
-    <p style="margin: 20px 0 0; color: #6b7280; font-size: 15px; line-height: 1.5;">
+    <p style="margin: 0 0 24px; color: #374151; font-size: 15px; line-height: 1.7;">
+      Feel free to reply to this email or give me a call — happy to chat whenever works for you.
+    </p>
+
+    <p style="margin: 0; color: #374151; font-size: 15px; line-height: 1.6;">
       Best regards,<br>
-      <strong style="color: #111827;">${senderName}</strong><br>
-      <span style="color: #9ca3af;">NextGen Realty</span>
+      <strong style="color: #111827;">${senderName}</strong>
     </p>
   `
 
   return {
     subject: `Following Up - ${propertyAddress}`,
-    html: baseEmailTemplate(content),
+    html: baseEmailTemplate(content, senderName),
   }
 }
 
@@ -174,41 +156,30 @@ export function offerTemplate(
       ${recipientName ? `Hi ${recipientName},` : 'Hello,'}
     </p>
 
-    <p style="margin: 0 0 20px; color: #4b5563; font-size: 15px; line-height: 1.6;">
-      I'm pleased to present an offer for the property at <strong style="color: #111827;">${property.address}</strong>.
+    <p style="margin: 0 0 20px; color: #374151; font-size: 15px; line-height: 1.7;">
+      I'm pleased to present a cash offer for the property at <strong>${property.address}</strong>.
     </p>
 
-    <div style="background-color: #f0fdf4; padding: 24px; border-radius: 8px; margin: 20px 0; border: 2px solid #10b981;">
-      <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
-        <tr>
-          <td style="padding: 8px 0;">
-            <strong style="color: #065f46; font-size: 14px;">OFFER AMOUNT</strong>
-          </td>
-        </tr>
-        <tr>
-          <td style="padding: 8px 0;">
-            <span style="color: #059669; font-size: 32px; font-weight: 700;">$${offerAmount.toLocaleString()}</span>
-          </td>
-        </tr>
-      </table>
+    <div style="background-color: #f0fdf4; padding: 20px 24px; border-radius: 6px; margin: 20px 0; border: 1px solid #bbf7d0;">
+      <p style="margin: 0 0 4px; color: #166534; font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;">Cash Offer</p>
+      <p style="margin: 0; color: #15803d; font-size: 30px; font-weight: 700;">$${offerAmount.toLocaleString()}</p>
     </div>
 
-    ${additionalNotes ? `<p style="margin: 20px 0; color: #4b5563; font-size: 15px; line-height: 1.6;">${additionalNotes}</p>` : ''}
+    ${additionalNotes ? `<p style="margin: 0 0 20px; color: #374151; font-size: 15px; line-height: 1.7;">${additionalNotes}</p>` : ''}
 
-    <p style="margin: 20px 0; color: #4b5563; font-size: 15px; line-height: 1.6;">
-      Please review the offer details and let me know if you have any questions. I'm happy to discuss this further at your convenience.
+    <p style="margin: 0 0 24px; color: #374151; font-size: 15px; line-height: 1.7;">
+      Please review and let me know if you have any questions — I'm happy to discuss the details at your convenience.
     </p>
 
-    <p style="margin: 20px 0 0; color: #6b7280; font-size: 15px; line-height: 1.5;">
+    <p style="margin: 0; color: #374151; font-size: 15px; line-height: 1.6;">
       Best regards,<br>
-      <strong style="color: #111827;">${senderName}</strong><br>
-      <span style="color: #9ca3af;">NextGen Realty</span>
+      <strong style="color: #111827;">${senderName}</strong>
     </p>
   `
 
   return {
     subject: `Offer Presented - ${property.address}`,
-    html: baseEmailTemplate(content),
+    html: baseEmailTemplate(content, senderName),
   }
 }
 
@@ -218,42 +189,37 @@ export function welcomeTemplate(
   agentName: string
 ): { subject: string; html: string } {
   const content = `
-    <h2 style="margin: 0 0 20px; color: #111827; font-size: 24px; font-weight: 600;">
-      Welcome to NextGen Realty!
-    </h2>
-
     <p style="margin: 0 0 20px; color: #111827; font-size: 16px; line-height: 1.5;">
       Hi ${recipientName},
     </p>
 
-    <p style="margin: 0 0 20px; color: #4b5563; font-size: 15px; line-height: 1.6;">
-      Thank you for choosing NextGen Realty. I'm <strong>${agentName}</strong>, and I'm excited to help you with your real estate journey.
+    <p style="margin: 0 0 20px; color: #374151; font-size: 15px; line-height: 1.7;">
+      Thank you for reaching out. I'm <strong>${agentName}</strong> with NextGen Realty, and I'm looking forward to working with you.
     </p>
 
-    <div style="background-color: #f9fafb; padding: 20px; border-radius: 8px; margin: 20px 0;">
-      <h3 style="margin: 0 0 15px; color: #111827; font-size: 18px; font-weight: 600;">What's Next?</h3>
-      <ul style="margin: 0; padding-left: 20px; color: #4b5563; font-size: 15px; line-height: 1.8;">
-        <li>We'll schedule an initial consultation to understand your needs</li>
-        <li>I'll start searching for properties that match your criteria</li>
-        <li>You'll receive regular updates on new listings and market insights</li>
-        <li>I'm here to answer any questions you have along the way</li>
+    <div style="background-color: #f9fafb; padding: 18px; border-radius: 6px; margin: 20px 0; border: 1px solid #e5e7eb;">
+      <p style="margin: 0 0 10px; color: #111827; font-size: 15px; font-weight: 600;">What to expect:</p>
+      <ul style="margin: 0; padding-left: 18px; color: #4b5563; font-size: 15px; line-height: 1.8;">
+        <li>An initial consultation to understand your situation</li>
+        <li>A fair, no-obligation offer on your property</li>
+        <li>Regular updates throughout the process</li>
+        <li>Quick, straightforward closing on your timeline</li>
       </ul>
     </div>
 
-    <p style="margin: 20px 0; color: #4b5563; font-size: 15px; line-height: 1.6;">
-      Feel free to reach out anytime. I'm looking forward to working with you!
+    <p style="margin: 0 0 24px; color: #374151; font-size: 15px; line-height: 1.7;">
+      Feel free to reply or call anytime — I'm here to help.
     </p>
 
-    <p style="margin: 20px 0 0; color: #6b7280; font-size: 15px; line-height: 1.5;">
+    <p style="margin: 0; color: #374151; font-size: 15px; line-height: 1.6;">
       Best regards,<br>
-      <strong style="color: #111827;">${agentName}</strong><br>
-      <span style="color: #9ca3af;">NextGen Realty</span>
+      <strong style="color: #111827;">${agentName}</strong>
     </p>
   `
 
   return {
     subject: 'Welcome to NextGen Realty!',
-    html: baseEmailTemplate(content),
+    html: baseEmailTemplate(content, agentName),
   }
 }
 
@@ -265,19 +231,19 @@ export function notificationTemplate(
   ctaUrl?: string
 ): { subject: string; html: string } {
   const content = `
-    <h2 style="margin: 0 0 20px; color: #111827; font-size: 24px; font-weight: 600;">
+    <h2 style="margin: 0 0 16px; color: #111827; font-size: 20px; font-weight: 600;">
       ${title}
     </h2>
 
-    <p style="margin: 0 0 20px; color: #4b5563; font-size: 15px; line-height: 1.6;">
+    <p style="margin: 0 0 20px; color: #374151; font-size: 15px; line-height: 1.7;">
       ${message}
     </p>
 
-    ${ctaText && ctaUrl ? `<a href="${ctaUrl}" style="display: inline-block; padding: 12px 24px; background-color: #667eea; color: #ffffff; text-decoration: none; border-radius: 6px; font-weight: 600; margin: 10px 0 20px;">${ctaText}</a>` : ''}
+    ${ctaText && ctaUrl ? `<a href="${ctaUrl}" style="display: inline-block; padding: 10px 20px; background-color: #2563eb; color: #ffffff; text-decoration: none; border-radius: 5px; font-weight: 600; font-size: 14px; margin: 4px 0 20px;">${ctaText}</a>` : ''}
 
-    <p style="margin: 20px 0 0; color: #6b7280; font-size: 15px; line-height: 1.5;">
+    <p style="margin: 20px 0 0; color: #374151; font-size: 15px; line-height: 1.6;">
       Best regards,<br>
-      <strong style="color: #111827;">The NextGen Realty Team</strong>
+      <strong style="color: #111827;">NextGen Realty</strong>
     </p>
   `
 
