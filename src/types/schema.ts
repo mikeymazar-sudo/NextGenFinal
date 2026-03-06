@@ -28,7 +28,7 @@ export interface Property {
   year_built: number | null
   lot_size: number | null
   property_type: string | null
-  status: 'new' | 'contacted' | 'warm' | 'follow_up' | 'closed'
+  status: 'new' | 'unanswered' | 'contacted' | 'warm' | 'follow_up' | 'closed'
   owner_name: string | null
   owner_first_name: string | null
   owner_last_name: string | null

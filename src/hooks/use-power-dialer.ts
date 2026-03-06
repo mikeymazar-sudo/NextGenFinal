@@ -439,8 +439,8 @@ export function usePowerDialer({
       if (settings.listId) {
         query = query.eq('list_id', settings.listId)
       } else if (settings.leadFilter === 'unanswered') {
-        // Unanswered leads: has been called at least once but never answered
-        query = query.gt('unanswered_count', 0)
+        // Unanswered leads: status is 'unanswered' (called but never answered)
+        query = query.eq('status', 'unanswered')
       } else {
         // "All New Leads" = status is 'new' AND never been called
         query = query.eq('status', 'new').is('last_called_at', null)
@@ -555,10 +555,10 @@ export function usePowerDialer({
   // Auto-process lead when mode is READY
   useEffect(() => {
     if (state.mode === 'READY' && deviceReady && state.queue.length > 0) {
-      // Small delay to let UI update
+      // Delay to let UI update and ensure everything loads
       const timeout = setTimeout(() => {
         processCurrentLead()
-      }, 500)
+      }, 2000)
       return () => clearTimeout(timeout)
     }
   }, [state.mode, state.currentIndex, deviceReady, state.queue.length, processCurrentLead])
@@ -700,7 +700,7 @@ export function usePowerDialer({
                           last_called_at: new Date().toISOString(),
                         }
                         if (d?.status === 'new') {
-                          updates.status = 'contacted'
+                          updates.status = 'unanswered'
                           updates.status_changed_at = new Date().toISOString()
                         }
                         sb.from('properties')
@@ -746,7 +746,7 @@ export function usePowerDialer({
                     last_called_at: new Date().toISOString(),
                   }
                   if (data?.status === 'new') {
-                    updates.status = 'contacted'
+                    updates.status = 'unanswered'
                     updates.status_changed_at = new Date().toISOString()
                   }
                   supabase

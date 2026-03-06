@@ -28,6 +28,7 @@ interface KanbanBoardProps {
 
 const COLUMNS = [
     { id: 'new', title: 'New', color: 'bg-blue-500' },
+    { id: 'unanswered', title: 'Unanswered', color: 'bg-red-500' },
     { id: 'contacted', title: 'Contacted', color: 'bg-cyan-500' },
     { id: 'warm', title: 'Warm', color: 'bg-orange-500' },
     { id: 'follow_up', title: 'Follow Up', color: 'bg-purple-500' },

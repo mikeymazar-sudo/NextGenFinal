@@ -247,7 +247,7 @@ export function DialerSidebarWidget() {
                                         last_called_at: new Date().toISOString(),
                                     }
                                     if (data?.status === 'new') {
-                                        updates.status = 'contacted'
+                                        updates.status = 'unanswered'
                                         updates.status_changed_at = new Date().toISOString()
                                     }
                                     supabase
