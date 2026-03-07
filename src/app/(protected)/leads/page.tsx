@@ -15,7 +15,15 @@ import type { Property } from '@/types/schema'
 export default function LeadsPage() {
   const [properties, setProperties] = useState<Property[]>([])
   const [loading, setLoading] = useState(true)
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set()
+    try {
+      const saved = sessionStorage.getItem('leads-selected-ids')
+      return saved ? new Set(JSON.parse(saved)) : new Set()
+    } catch {
+      return new Set()
+    }
+  })
   const [filters, setFilters] = useState<LeadsFilters>({
     search: '',
     priority: 'all',
@@ -65,6 +73,12 @@ export default function LeadsPage() {
   useEffect(() => {
     fetchProperties()
   }, [fetchProperties])
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem('leads-selected-ids', JSON.stringify(Array.from(selectedIds)))
+    } catch {}
+  }, [selectedIds])
 
   // Filter properties locally
   const filteredProperties = useMemo(() => {
@@ -177,6 +191,7 @@ export default function LeadsPage() {
         <KanbanBoard
           leads={filteredProperties}
           selectedIds={selectedIds}
+          isSelectionMode={selectedIds.size > 0}
           onSelect={handleSelect}
           onUpdate={fetchProperties}
         />

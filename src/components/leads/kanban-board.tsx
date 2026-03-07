@@ -22,6 +22,7 @@ import type { Property } from '@/types/schema'
 interface KanbanBoardProps {
     leads: Property[]
     selectedIds: Set<string>
+    isSelectionMode: boolean
     onSelect: (id: string, selected: boolean) => void
     onUpdate: () => void
 }
@@ -37,7 +38,7 @@ const COLUMNS = [
 
 type ColumnId = typeof COLUMNS[number]['id']
 
-export function KanbanBoard({ leads, selectedIds, onSelect, onUpdate }: KanbanBoardProps) {
+export function KanbanBoard({ leads, selectedIds, isSelectionMode, onSelect, onUpdate }: KanbanBoardProps) {
     const [activeId, setActiveId] = useState<string | null>(null)
 
     const sensors = useSensors(
@@ -130,6 +131,7 @@ export function KanbanBoard({ leads, selectedIds, onSelect, onUpdate }: KanbanBo
                         color={column.color}
                         leads={getLeadsByStatus(column.id)}
                         selectedIds={selectedIds}
+                        isSelectionMode={isSelectionMode}
                         onSelect={onSelect}
                         onUpdate={onUpdate}
                     />

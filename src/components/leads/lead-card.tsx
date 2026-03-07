@@ -31,6 +31,7 @@ import type { Property } from '@/types/schema'
 interface LeadCardProps {
     property: Property
     isSelected: boolean
+    isSelectionMode: boolean
     onSelect: (id: string, selected: boolean) => void
     onUpdate: () => void
 }
@@ -47,7 +48,7 @@ const priorityDots = {
     low: 'bg-green-500',
 }
 
-export function LeadCard({ property, isSelected, onSelect, onUpdate }: LeadCardProps) {
+export function LeadCard({ property, isSelected, isSelectionMode, onSelect, onUpdate }: LeadCardProps) {
     const [isUpdating, setIsUpdating] = useState(false)
     const [showDatePicker, setShowDatePicker] = useState(false)
     const [showPriorityMenu, setShowPriorityMenu] = useState(false)
@@ -113,29 +114,33 @@ export function LeadCard({ property, isSelected, onSelect, onUpdate }: LeadCardP
         <Card
             ref={setNodeRef}
             style={style}
+            onClick={isSelectionMode ? () => onSelect(property.id, !isSelected) : undefined}
             className={`p-3 mb-2 bg-white dark:bg-zinc-900 border shadow-sm hover:shadow-md transition-all group ${isDragging ? 'shadow-lg ring-2 ring-blue-500' : ''
-                } ${isSelected ? 'ring-2 ring-blue-500' : ''}`}
+                } ${isSelected ? 'ring-2 ring-blue-500' : ''} ${isSelectionMode ? 'cursor-pointer' : ''}`}
         >
             <div className="flex items-start gap-2">
                 {/* Drag Handle */}
                 <div
                     {...attributes}
                     {...listeners}
+                    onClick={(e) => e.stopPropagation()}
                     className="cursor-grab active:cursor-grabbing opacity-0 group-hover:opacity-100 transition-opacity mt-1"
                 >
                     <GripVertical className="h-4 w-4 text-muted-foreground" />
                 </div>
 
                 {/* Checkbox */}
-                <Checkbox
-                    checked={isSelected}
-                    onCheckedChange={(checked) => onSelect(property.id, checked as boolean)}
-                    className="mt-1"
-                />
+                <div onClick={(e) => e.stopPropagation()}>
+                    <Checkbox
+                        checked={isSelected}
+                        onCheckedChange={(checked) => onSelect(property.id, checked as boolean)}
+                        className="mt-1"
+                    />
+                </div>
 
                 {/* Content */}
                 <div className="flex-1 min-w-0">
-                    <Link href={`/leads/${property.id}`} className="block">
+                    <Link href={`/leads/${property.id}`} onClick={(e) => e.stopPropagation()} className="block">
                         <p className="text-sm font-medium truncate hover:text-blue-600 transition-colors">
                             {property.address}
                         </p>
@@ -209,7 +214,7 @@ export function LeadCard({ property, isSelected, onSelect, onUpdate }: LeadCardP
                 </div>
 
                 {/* Quick Actions (visible on hover) */}
-                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
                     {/* Follow-up Date Picker */}
                     <Popover open={showDatePicker} onOpenChange={setShowDatePicker}>
                         <PopoverTrigger asChild>
@@ -274,7 +279,7 @@ export function LeadCard({ property, isSelected, onSelect, onUpdate }: LeadCardP
                     </Popover>
 
                     {/* Notes Link */}
-                    <Link href={`/leads/${property.id}#notes`}>
+                    <Link href={`/leads/${property.id}#notes`} onClick={(e) => e.stopPropagation()}>
                         <Button variant="ghost" size="icon" className="h-7 w-7">
                             <StickyNote className="h-4 w-4" />
                         </Button>

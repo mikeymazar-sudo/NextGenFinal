@@ -12,6 +12,7 @@ interface KanbanColumnProps {
     color: string
     leads: Property[]
     selectedIds: Set<string>
+    isSelectionMode: boolean
     onSelect: (id: string, selected: boolean) => void
     onUpdate: () => void
 }
@@ -29,6 +30,7 @@ export function KanbanColumn({
     color,
     leads,
     selectedIds,
+    isSelectionMode,
     onSelect,
     onUpdate,
 }: KanbanColumnProps) {
@@ -74,6 +76,7 @@ export function KanbanColumn({
                                 key={lead.id}
                                 property={lead}
                                 isSelected={selectedIds.has(lead.id)}
+                                isSelectionMode={isSelectionMode}
                                 onSelect={onSelect}
                                 onUpdate={onUpdate}
                             />
