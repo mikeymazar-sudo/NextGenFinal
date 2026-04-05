@@ -29,6 +29,9 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(false)
   const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null)
+  const fetchedProfileUserIdRef = useRef<string | null>(null)
+  const inFlightProfileUserIdRef = useRef<string | null>(null)
+  const inFlightProfileRequestRef = useRef<Promise<void> | null>(null)
 
   const getSupabase = useCallback(() => {
     if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
@@ -42,36 +45,61 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
     return supabaseRef.current
   }, [])
 
-  const fetchProfile = useCallback(async (userId: string) => {
+  const fetchProfile = useCallback(async (userId: string, { force = false }: { force?: boolean } = {}) => {
     const supabase = getSupabase()
 
     if (!supabase) {
       return
     }
 
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single()
-
-      if (error) {
-        console.error('Profile fetch error:', error.message)
+    if (!force) {
+      if (fetchedProfileUserIdRef.current === userId) {
         return
       }
 
-      if (data) {
-        setProfile(data as UserProfile)
+      if (
+        inFlightProfileRequestRef.current &&
+        inFlightProfileUserIdRef.current === userId
+      ) {
+        await inFlightProfileRequestRef.current
+        return
       }
-    } catch (err) {
-      console.error('Profile fetch exception:', err)
     }
+
+    const profileRequest = (async () => {
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', userId)
+          .maybeSingle()
+
+        if (error) {
+          console.error('Profile fetch error:', error.message)
+          return
+        }
+
+        setProfile((data as UserProfile | null) ?? null)
+        fetchedProfileUserIdRef.current = userId
+      } catch (err) {
+        console.error('Profile fetch exception:', err)
+      } finally {
+        if (inFlightProfileRequestRef.current === profileRequest) {
+          inFlightProfileRequestRef.current = null
+          inFlightProfileUserIdRef.current = null
+        }
+      }
+    })()
+
+    inFlightProfileUserIdRef.current = userId
+    inFlightProfileRequestRef.current = profileRequest
+
+    await profileRequest
   }, [getSupabase])
 
   const refreshProfile = useCallback(async () => {
     if (user) {
-      await fetchProfile(user.id)
+      await fetchProfile(user.id, { force: true })
     }
   }, [user, fetchProfile])
 
@@ -105,6 +133,9 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
         if (currentUser) {
           void fetchProfile(currentUser.id)
         } else {
+          fetchedProfileUserIdRef.current = null
+          inFlightProfileUserIdRef.current = null
+          inFlightProfileRequestRef.current = null
           setSession(null)
           setProfile(null)
         }
@@ -124,9 +155,15 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
         setLoading(false)
 
         if (newSession?.user) {
-          // Don't await - fetch profile in background so loading clears immediately
-          fetchProfile(newSession.user.id)
+          if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
+            void fetchProfile(newSession.user.id, {
+              force: event === 'USER_UPDATED',
+            })
+          }
         } else {
+          fetchedProfileUserIdRef.current = null
+          inFlightProfileUserIdRef.current = null
+          inFlightProfileRequestRef.current = null
           setProfile(null)
         }
 
@@ -149,7 +186,17 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
       return { error: 'Missing Supabase configuration.' }
     }
 
-    const { error } = await supabase.auth.signInWithPassword({ email, password })
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+
+    if (!error) {
+      setSession(data.session ?? null)
+      setUser(data.user ?? null)
+
+      if (data.user) {
+        void fetchProfile(data.user.id)
+      }
+    }
+
     return { error: error?.message || null }
   }
 
@@ -177,6 +224,9 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
       await supabase.auth.signOut()
     }
 
+    fetchedProfileUserIdRef.current = null
+    inFlightProfileUserIdRef.current = null
+    inFlightProfileRequestRef.current = null
     setUser(null)
     setProfile(null)
     setSession(null)

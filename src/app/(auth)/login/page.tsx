@@ -9,6 +9,26 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Building2, Loader2 } from 'lucide-react'
 
+const AUTH_COOKIE_PREFIX = 'supabase.auth.token'
+
+async function waitForAuthCookie(timeoutMs = 1500) {
+  const deadline = Date.now() + timeoutMs
+
+  while (Date.now() < deadline) {
+    const hasAuthCookie = document.cookie
+      .split('; ')
+      .some((cookie) => cookie.startsWith(AUTH_COOKIE_PREFIX))
+
+    if (hasAuthCookie) {
+      return true
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 50))
+  }
+
+  return false
+}
+
 export default function LoginPage() {
   const [isSignUp, setIsSignUp] = useState(false)
   const [email, setEmail] = useState('')
@@ -22,7 +42,6 @@ export default function LoginPage() {
 
   const navigateToDashboard = () => {
     router.replace('/dashboard')
-    router.refresh()
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -42,6 +61,11 @@ export default function LoginPage() {
           if (signInError) {
             setError('Account created! Please check your email to verify, then sign in.')
           } else {
+            const hasAuthCookie = await waitForAuthCookie()
+            if (!hasAuthCookie) {
+              setError('Account created, but your browser did not keep the session. Please sign in again.')
+              return
+            }
             navigateToDashboard()
           }
         }
@@ -50,6 +74,11 @@ export default function LoginPage() {
         if (signInError) {
           setError(signInError)
         } else {
+          const hasAuthCookie = await waitForAuthCookie()
+          if (!hasAuthCookie) {
+            setError('Signed in, but your browser did not keep the session. Please try again.')
+            return
+          }
           navigateToDashboard()
         }
       }
