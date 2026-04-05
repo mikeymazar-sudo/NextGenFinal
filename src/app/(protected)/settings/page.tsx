@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useAuth } from '@/providers/auth-provider'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
@@ -14,12 +14,45 @@ import { useTheme } from 'next-themes'
 import { Loader2, User, Users, BarChart3, Moon, Sun } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
+import type { UserPhoneNumber } from '@/types/schema'
 
 export default function SettingsPage() {
   const { profile, refreshProfile } = useAuth()
   const { setTheme, theme } = useTheme()
   const [fullName, setFullName] = useState(profile?.full_name || '')
   const [saving, setSaving] = useState(false)
+  const [phoneNumber, setPhoneNumber] = useState<UserPhoneNumber | null>(null)
+  const [loadingPhoneNumber, setLoadingPhoneNumber] = useState(true)
+  const [retryingPhoneNumber, setRetryingPhoneNumber] = useState(false)
+
+  useEffect(() => {
+    if (!profile?.id) return
+
+    let cancelled = false
+    const loadPhoneNumber = async () => {
+      try {
+        setLoadingPhoneNumber(true)
+        const response = await fetch('/api/phone-number')
+        const payload = await response.json().catch(() => null)
+
+        if (!cancelled) {
+          setPhoneNumber((payload?.data?.assignment as UserPhoneNumber | null) || null)
+        }
+      } catch (error) {
+        console.error('Failed to load dedicated phone number:', error)
+      } finally {
+        if (!cancelled) {
+          setLoadingPhoneNumber(false)
+        }
+      }
+    }
+
+    void loadPhoneNumber()
+
+    return () => {
+      cancelled = true
+    }
+  }, [profile?.id])
 
   const saveProfile = async () => {
     setSaving(true)
@@ -36,6 +69,25 @@ export default function SettingsPage() {
     } else {
       await refreshProfile()
       toast.success('Profile updated')
+    }
+  }
+
+  const retryPhoneProvisioning = async () => {
+    try {
+      setRetryingPhoneNumber(true)
+      const response = await fetch('/api/phone-number', { method: 'POST' })
+      const payload = await response.json().catch(() => null)
+
+      if (!response.ok) {
+        throw new Error(payload?.error || 'Provisioning failed')
+      }
+
+      setPhoneNumber((payload?.data?.assignment as UserPhoneNumber | null) || null)
+      toast.success('Dedicated phone number is ready')
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : 'Provisioning failed')
+    } finally {
+      setRetryingPhoneNumber(false)
     }
   }
 
@@ -124,6 +176,44 @@ export default function SettingsPage() {
                 <Button onClick={saveProfile} disabled={saving}>
                   {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                   Save Changes
+                </Button>
+              </div>
+
+              <Separator />
+
+              <div className="space-y-3 max-w-md">
+                <div className="space-y-1">
+                  <Label>Dedicated Phone Number</Label>
+                  <p className="text-sm font-medium">
+                    {loadingPhoneNumber
+                      ? 'Loading...'
+                      : phoneNumber?.phone_number || 'Not assigned yet'}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Provisioning: {phoneNumber?.provisioning_status || 'not-started'}
+                  </p>
+                  <p className="text-xs text-muted-foreground">
+                    Browser voice routing: {phoneNumber?.voice_routing_status || 'pending'}
+                  </p>
+                  {phoneNumber?.provisioning_error && (
+                    <p className="text-xs text-red-600 dark:text-red-400">
+                      {phoneNumber.provisioning_error}
+                    </p>
+                  )}
+                  {!phoneNumber?.provisioning_error && phoneNumber?.voice_routing_error && (
+                    <p className="text-xs text-muted-foreground">
+                      {phoneNumber.voice_routing_error}
+                    </p>
+                  )}
+                </div>
+
+                <Button
+                  variant="outline"
+                  onClick={retryPhoneProvisioning}
+                  disabled={retryingPhoneNumber}
+                >
+                  {retryingPhoneNumber && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Retry Number Provisioning
                 </Button>
               </div>
             </CardContent>

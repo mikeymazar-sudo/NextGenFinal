@@ -66,7 +66,9 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
       }
     }
 
-    const profileRequest = (async () => {
+    let profileRequest: Promise<void> | null = null
+
+    profileRequest = (async () => {
       try {
         const { data, error } = await supabase
           .from('profiles')

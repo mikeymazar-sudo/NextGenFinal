@@ -3,6 +3,8 @@ export interface SignalWireAddress {
   name: string
   display_name?: string | null
   locked?: boolean
+  resource_id?: string
+  type?: string
   channels?: {
     audio?: string
     messaging?: string
@@ -44,30 +46,35 @@ export function findSignalWireOutboundAddressId(
   addresses: SignalWireAddress[],
   phoneNumber: string
 ) {
-  const targetPhoneKey = normalizePhoneKey(phoneNumber)
-  if (!targetPhoneKey) {
+  const outboundAddresses = addresses.filter(
+    (address) =>
+      !address.locked &&
+      isSignalWireExternalAudioAddress(address) &&
+      address.channels?.audio
+  )
+
+  if (!outboundAddresses.length) {
     return null
   }
 
-  const exactMatch = addresses.find((address) => {
-    if (address.locked || !isSignalWireExternalAudioAddress(address)) {
-      return false
-    }
+  const targetPhoneKey = normalizePhoneKey(phoneNumber)
+  const exactMatch = targetPhoneKey
+    ? outboundAddresses.find((address) => {
+        const candidates = [
+          address.display_name || '',
+          address.name,
+          getAudioChannelKey(address),
+        ]
 
-    const candidates = [
-      address.display_name || '',
-      address.name,
-      getAudioChannelKey(address),
-    ]
-
-    return candidates.some(
-      (candidate) => normalizePhoneKey(candidate) === targetPhoneKey
-    )
-  })
+        return candidates.some(
+          (candidate) => normalizePhoneKey(candidate) === targetPhoneKey
+        )
+      })
+    : null
 
   if (exactMatch) {
     return exactMatch.id
   }
 
-  return pickSignalWireExternalAudioAddressId(addresses)
+  return outboundAddresses.length === 1 ? outboundAddresses[0].id : null
 }

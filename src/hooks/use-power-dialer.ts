@@ -378,6 +378,8 @@ interface UsePowerDialerParams {
   callState: TwilioCallState
   duration: number
   deviceReady: boolean
+  assignedPhoneNumber: string | null
+  assignedPhoneNumberId: string | null
   makeCall: (to: string) => Promise<string | null>
   hangUp: () => void
   userId: string | undefined
@@ -401,6 +403,8 @@ export function usePowerDialer({
   callState,
   duration,
   deviceReady,
+  assignedPhoneNumber,
+  assignedPhoneNumberId,
   makeCall,
   hangUp,
   userId,
@@ -704,10 +708,11 @@ export function usePowerDialer({
                 // Log unanswered call in calls table
                 sb.from('calls').insert({
                   caller_id: userId,
+                  user_phone_number_id: assignedPhoneNumberId || null,
                   to_number: stateRef.current.currentPhone,
                   status: 'no-answer',
                   duration: 0,
-                  from_number: '',
+                  from_number: assignedPhoneNumber || '',
                   property_id: failedLead.propertyId,
                   ended_at: new Date().toISOString(),
                 }).then()
@@ -747,10 +752,11 @@ export function usePowerDialer({
           // Log unanswered call in calls table
           supabase.from('calls').insert({
             caller_id: userId,
+            user_phone_number_id: assignedPhoneNumberId || null,
             to_number: s.currentPhone,
             status: 'no-answer',
             duration: 0,
-            from_number: '',
+            from_number: assignedPhoneNumber || '',
             property_id: lead.propertyId,
             ended_at: new Date().toISOString(),
           }).then()
@@ -783,7 +789,7 @@ export function usePowerDialer({
         }
       }
     }
-  }, [callState, makeCall, router])
+  }, [assignedPhoneNumber, assignedPhoneNumberId, callState, makeCall, router, userId])
 
   // ─── Cleanup ────────────────────────────────────────────────────
 

@@ -44,6 +44,25 @@ export default function LoginPage() {
     router.replace('/dashboard')
   }
 
+  const ensureDedicatedPhoneNumber = async () => {
+    const response = await fetch('/api/phone-number', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    })
+
+    const payload = await response.json().catch(() => null)
+    const assignment = payload?.data?.assignment
+
+    if (!response.ok || !assignment?.phone_number) {
+      throw new Error(
+        payload?.error ||
+          'Account created, but dedicated phone number provisioning failed.'
+      )
+    }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
@@ -66,6 +85,7 @@ export default function LoginPage() {
               setError('Account created, but your browser did not keep the session. Please sign in again.')
               return
             }
+            await ensureDedicatedPhoneNumber()
             navigateToDashboard()
           }
         }
@@ -82,8 +102,12 @@ export default function LoginPage() {
           navigateToDashboard()
         }
       }
-    } catch {
-      setError('Something went wrong. Please try again.')
+    } catch (error) {
+      setError(
+        error instanceof Error && error.message.trim()
+          ? error.message
+          : 'Something went wrong. Please try again.'
+      )
     } finally {
       setLoading(false)
     }

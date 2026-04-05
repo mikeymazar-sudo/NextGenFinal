@@ -8,7 +8,10 @@ import {
   type SignalWireClient,
 } from '@signalwire/js'
 import { api } from '@/lib/api/client'
-import { pickSignalWireExternalAudioAddressId, type SignalWireAddress } from '@/lib/signalwire/shared'
+import {
+  findSignalWireOutboundAddressId,
+  type SignalWireAddress,
+} from '@/lib/signalwire/shared'
 import { normalizePhoneNumber } from '@/lib/utils'
 
 export type TwilioCallState = 'idle' | 'connecting' | 'ringing' | 'live' | 'ended'
@@ -17,14 +20,16 @@ type SignalWireCall = Pick<
   FabricRoomSession,
   'id' | 'on' | 'start' | 'hangup' | 'audioMute' | 'audioUnmute'
 >
-type SignalWireAddressResult = {
-  data: SignalWireAddress[]
+type SignalWireSubscriberInfoResult = {
+  fabric_addresses?: SignalWireAddress[]
 }
 
 interface UseTwilioReturn {
   callState: TwilioCallState
   device: SignalWireClient | null
   deviceReady: boolean
+  assignedPhoneNumber: string | null
+  assignedPhoneNumberId: string | null
   makeCall: (toNumber: string) => Promise<string | null>
   hangUp: () => void
   toggleMute: () => void
@@ -85,6 +90,8 @@ export function useTwilio({
   const [callState, setCallState] = useState<TwilioCallState>('idle')
   const [device, setDevice] = useState<SignalWireClient | null>(null)
   const [deviceReady, setDeviceReady] = useState(false)
+  const [assignedPhoneNumber, setAssignedPhoneNumber] = useState<string | null>(null)
+  const [assignedPhoneNumberId, setAssignedPhoneNumberId] = useState<string | null>(null)
   const [isMuted, setIsMuted] = useState(false)
   const [duration, setDuration] = useState(0)
   const [error, setError] = useState<string | null>(null)
@@ -133,6 +140,8 @@ export function useTwilio({
 
     clientRef.current = null
     outboundAddressIdRef.current = null
+    setAssignedPhoneNumber(null)
+    setAssignedPhoneNumberId(null)
     activeCallRef.current = null
 
     if (mountedRef.current) {
@@ -213,6 +222,8 @@ export function useTwilio({
       }
 
       const token = result.data.token
+      const phoneNumber = result.data.phoneNumber
+      const phoneNumberId = result.data.phoneNumberId || null
       let outboundAddressId = result.data.outboundAddressId || null
       console.log('[SignalWire] Token received, initializing client...')
 
@@ -244,12 +255,10 @@ export function useTwilio({
 
       if (!outboundAddressId) {
         try {
-          const addressResult = await sw.address.getAddresses({
-            type: 'app',
-            pageSize: 100,
-          }) as SignalWireAddressResult
-          outboundAddressId = pickSignalWireExternalAudioAddressId(
-            addressResult.data || []
+          const subscriberInfo = await sw.getSubscriberInfo() as SignalWireSubscriberInfoResult
+          outboundAddressId = findSignalWireOutboundAddressId(
+            subscriberInfo.fabric_addresses || [],
+            phoneNumber
           )
         } catch (lookupError) {
           console.error('[SignalWire] Failed to resolve outbound address:', lookupError)
@@ -269,6 +278,8 @@ export function useTwilio({
 
       clientRef.current = sw
       outboundAddressIdRef.current = outboundAddressId
+      setAssignedPhoneNumber(phoneNumber)
+      setAssignedPhoneNumberId(phoneNumberId)
       setDevice(sw)
       setDeviceReady(true)
       setError(null)
@@ -285,6 +296,8 @@ export function useTwilio({
           if (refreshResult.data?.token && clientRef.current) {
             outboundAddressIdRef.current =
               refreshResult.data.outboundAddressId || outboundAddressIdRef.current
+            setAssignedPhoneNumber(refreshResult.data.phoneNumber || phoneNumber)
+            setAssignedPhoneNumberId(refreshResult.data.phoneNumberId || phoneNumberId)
             await clientRef.current.updateToken(refreshResult.data.token)
           }
         } catch (e) {
@@ -405,6 +418,8 @@ export function useTwilio({
     callState,
     device,
     deviceReady,
+    assignedPhoneNumber,
+    assignedPhoneNumberId,
     makeCall,
     hangUp,
     toggleMute,

@@ -44,7 +44,7 @@ class ApiClient {
       }
 
       return { data: json.data, cached: json.cached }
-    } catch (error) {
+    } catch {
       return { error: 'Network error. Please check your connection.' }
     }
   }
@@ -230,7 +230,13 @@ class ApiClient {
 
   // Voice
   async getVoiceToken() {
-    return this.request<{ token: string; identity: string; outboundAddressId: string }>('/api/voice/token')
+    return this.request<{
+      token: string
+      identity: string
+      outboundAddressId: string
+      phoneNumber: string
+      phoneNumberId: string
+    }>('/api/voice/token')
   }
 
   async updateCallNotes(callId: string, notes: string, propertyId?: string) {

@@ -15,6 +15,28 @@ export interface UserProfile {
   avatar_url: string | null
 }
 
+export interface UserPhoneNumber {
+  id: string
+  user_id: string
+  phone_number: string | null
+  provider: string
+  signalwire_incoming_phone_number_sid: string | null
+  signalwire_subscriber_id: string | null
+  signalwire_address_id: string | null
+  provisioning_status: 'pending' | 'provisioning' | 'active' | 'failed' | 'released'
+  voice_routing_status: 'pending' | 'active' | 'failed'
+  assignment_source: 'auto' | 'manual'
+  friendly_name: string | null
+  provisioning_error: string | null
+  voice_routing_error: string | null
+  assigned_at: string | null
+  released_at: string | null
+  last_provisioning_attempt_at: string | null
+  last_verified_at: string | null
+  created_at: string
+  updated_at: string
+}
+
 export interface Property {
   id: string
   address: string
@@ -52,7 +74,7 @@ export interface Property {
   status_changed_at: string | null
   list_id: string | null
   list?: LeadList
-  raw_realestate_data?: Record<string, any> | null
+  raw_realestate_data?: Record<string, unknown> | null
   analysis_overrides?: Partial<AnalysisSettings> | null
   calculator_scenarios?: Record<string, unknown>[]
   unanswered_count: number
@@ -261,6 +283,7 @@ export interface Call {
   property_id: string | null
   contact_id: string | null
   caller_id: string
+  user_phone_number_id: string | null
   twilio_call_sid: string
   from_number: string | null
   to_number: string | null
@@ -300,6 +323,8 @@ export interface Message {
   twilio_status: string | null
   error_code: string | null
   error_message: string | null
+  user_id: string | null
+  user_phone_number_id: string | null
   contact_id: string | null
   property_id: string | null
   media_urls: string[] | null

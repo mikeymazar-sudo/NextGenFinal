@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -46,6 +46,8 @@ export default function DialerPage() {
   const {
     callState,
     deviceReady,
+    assignedPhoneNumber,
+    assignedPhoneNumberId,
     makeCall: twilioMakeCall,
     hangUp: twilioHangUp,
     toggleMute,
@@ -109,9 +111,10 @@ export default function DialerPage() {
         .from('calls')
         .insert({
           caller_id: user?.id,
+          user_phone_number_id: assignedPhoneNumberId || null,
           to_number: normalizedNumber,
           status: 'initiated',
-          from_number: '',
+          from_number: assignedPhoneNumber || '',
         })
         .select()
         .single()

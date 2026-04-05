@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useSearchParams, useRouter, usePathname } from 'next/navigation'
+import { useSearchParams, usePathname } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import {
@@ -63,12 +63,13 @@ export function DialerSidebarWidget() {
     const { user } = useAuth()
 
     const searchParams = useSearchParams()
-    const router = useRouter()
     const pathname = usePathname()
 
     const {
         callState,
         deviceReady,
+        assignedPhoneNumber,
+        assignedPhoneNumberId,
         makeCall: twilioMakeCall,
         hangUp: twilioHangUp,
         toggleMute,
@@ -84,6 +85,8 @@ export function DialerSidebarWidget() {
         callState,
         duration,
         deviceReady,
+        assignedPhoneNumber,
+        assignedPhoneNumberId,
         makeCall: twilioMakeCall,
         hangUp: twilioHangUp,
         userId: user?.id,
@@ -109,7 +112,7 @@ export function DialerSidebarWidget() {
         window.history.replaceState({}, '', url.toString())
     }, [])
 
-    const initiateAutoCall = async (phoneNumber: string, associatedPropertyId?: string | null) => {
+    const initiateAutoCall = useCallback(async (phoneNumber: string, associatedPropertyId?: string | null) => {
         // Clear URL params immediately to prevent re-triggers
         clearDialParams()
 
@@ -128,9 +131,10 @@ export function DialerSidebarWidget() {
                 .from('calls')
                 .insert({
                     caller_id: user?.id,
+                    user_phone_number_id: assignedPhoneNumberId || null,
                     to_number: normalizedNumber,
                     status: 'initiated',
-                    from_number: '',
+                    from_number: assignedPhoneNumber || '',
                     property_id: associatedPropertyId || propertyId,
                 })
                 .select()
@@ -154,7 +158,7 @@ export function DialerSidebarWidget() {
         } catch {
             toast.error('Failed to connect call')
         }
-    }
+    }, [assignedPhoneNumber, assignedPhoneNumberId, clearDialParams, propertyId, twilioMakeCall, user?.id])
 
     // Check for number to dial from URL + auto_call support
     useEffect(() => {
@@ -200,7 +204,7 @@ export function DialerSidebarWidget() {
                 }
             }
         }
-    }, [searchParams, pathname, deviceReady, callState, twilioHangUp, clearDialParams, isPowerDialerActive])
+    }, [searchParams, pathname, deviceReady, callState, initiateAutoCall, isPowerDialerActive])
 
     // Handle pending auto-call when device becomes ready
     useEffect(() => {
@@ -208,7 +212,7 @@ export function DialerSidebarWidget() {
             setPendingAutoCall(false)
             initiateAutoCall(number, propertyId)
         }
-    }, [pendingAutoCall, deviceReady, callState, number, propertyId]) // eslint-disable-line react-hooks/exhaustive-deps
+    }, [pendingAutoCall, deviceReady, callState, number, propertyId, initiateAutoCall])
 
     // Track when manual call goes live (answered)
     useEffect(() => {
@@ -273,7 +277,7 @@ export function DialerSidebarWidget() {
                 resetCall()
             }
         }
-    }, [callState, currentCallId, isPowerDialerActive])
+    }, [callState, currentCallId, isPowerDialerActive, propertyId])
 
     // Open notes modal when power dialer enters DISPOSITION mode
     useEffect(() => {
@@ -308,9 +312,10 @@ export function DialerSidebarWidget() {
                 .from('calls')
                 .insert({
                     caller_id: user?.id,
+                    user_phone_number_id: assignedPhoneNumberId || null,
                     to_number: normalizedNumber,
                     status: 'initiated',
-                    from_number: '',
+                    from_number: assignedPhoneNumber || '',
                     property_id: propertyId,
                 })
                 .select()

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { RestClient } from '@signalwire/compatibility-api'
 import { createAdminClient } from '@/lib/supabase/server'
+import { getUserPhoneNumberForUser } from '@/lib/signalwire/user-phone-numbers'
 
 export async function POST(req: NextRequest) {
   try {
@@ -35,6 +36,7 @@ export async function POST(req: NextRequest) {
     const recordingUrl = params.RecordingUrl
 
     const supabase = createAdminClient()
+    const assignment = callerId ? await getUserPhoneNumberForUser(callerId) : null
 
     if (callSid) {
       // Check if call record exists
@@ -51,6 +53,7 @@ export async function POST(req: NextRequest) {
           .update({
             status: callStatus,
             duration,
+            user_phone_number_id: assignment?.id || undefined,
             ended_at: callStatus === 'completed' ? new Date().toISOString() : undefined,
             recording_sid: recordingSid,
             recording_url: recordingUrl,
@@ -61,6 +64,7 @@ export async function POST(req: NextRequest) {
         await supabase.from('calls').insert({
           twilio_call_sid: callSid,
           caller_id: callerId,
+          user_phone_number_id: assignment?.id || null,
           from_number: from,
           to_number: to,
           status: callStatus,
