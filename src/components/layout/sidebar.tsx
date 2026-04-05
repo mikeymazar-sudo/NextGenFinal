@@ -33,6 +33,7 @@ export function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
   const { profile, signOut } = useAuth()
+  const showDialerWidget = !pathname.startsWith('/dialer')
 
   const handleSignOut = async () => {
     await signOut()
@@ -83,7 +84,7 @@ export function Sidebar() {
         </nav>
 
         {/* Dialer Widget */}
-        <DialerSidebarWidget />
+        {showDialerWidget ? <DialerSidebarWidget /> : null}
 
         {/* User Menu */}
         <div className="p-3 border-t border-zinc-200 dark:border-zinc-800">

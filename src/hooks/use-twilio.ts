@@ -40,6 +40,45 @@ interface UseTwilioOptions {
   suppressConfigurationErrors?: boolean
 }
 
+function getSignalWireErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message.trim()) {
+    if (error.name === 'NotAllowedError') {
+      return 'Microphone access is blocked. Allow microphone access and try again.'
+    }
+    return error.message
+  }
+
+  if (typeof error === 'string' && error.trim()) {
+    return error
+  }
+
+  if (error && typeof error === 'object') {
+    const maybeError = error as Record<string, unknown>
+
+    if (maybeError.name === 'NotAllowedError') {
+      return 'Microphone access is blocked. Allow microphone access and try again.'
+    }
+
+    const candidateKeys = ['message', 'error', 'reason', 'description']
+    for (const key of candidateKeys) {
+      const value = maybeError[key]
+      if (typeof value === 'string' && value.trim()) {
+        return value
+      }
+    }
+
+    const nestedError = maybeError.error
+    if (nestedError && typeof nestedError === 'object') {
+      const nestedMessage = (nestedError as Record<string, unknown>).message
+      if (typeof nestedMessage === 'string' && nestedMessage.trim()) {
+        return nestedMessage
+      }
+    }
+  }
+
+  return fallback
+}
+
 export function useTwilio({
   suppressConfigurationErrors = false,
 }: UseTwilioOptions = {}): UseTwilioReturn {
@@ -82,9 +121,13 @@ export function useTwilio({
 
     if (clientRef.current) {
       try {
-        await clientRef.current.offline()
+        await clientRef.current.disconnect()
       } catch {
-        // Ignore cleanup errors while resetting the client state.
+        try {
+          await clientRef.current.offline()
+        } catch {
+          // Ignore cleanup errors while resetting the client state.
+        }
       }
     }
 
@@ -251,7 +294,7 @@ export function useTwilio({
 
     } catch (err: unknown) {
       if (!mountedRef.current) return
-      const message = err instanceof Error ? err.message : 'Failed to initialize SignalWire'
+      const message = getSignalWireErrorMessage(err, 'Failed to initialize SignalWire')
       console.error('[SignalWire] Init error:', err)
       setError(`Voice setup failed: ${message}`)
       setInitializing(false)
@@ -302,7 +345,7 @@ export function useTwilio({
 
       return call.id || null
     } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to make call'
+      const message = getSignalWireErrorMessage(err, 'Failed to make call')
       console.error('[SignalWire] makeCall error:', err)
       setError(message)
       setCallState('idle')
