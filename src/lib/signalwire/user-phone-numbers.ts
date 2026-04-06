@@ -290,13 +290,110 @@ export async function resolveSignalWireOutboundAddressIdForToken(
   return findSignalWireOutboundAddressId(addressesPayload.data || [], phoneNumber)
 }
 
+interface SignalWirePhoneRoute {
+  id: string
+  name?: string
+  phone_number?: string
+  number?: string
+}
+
+async function findPhoneRouteForNumber(phoneNumber: string) {
+  const { apiToken, projectId, spaceHost } = getSignalWireAdminConfig()
+  const normalizedPhone = normalizePhoneNumber(phoneNumber)
+
+  const response = await fetch(
+    `https://${spaceHost}/api/fabric/phone_routes?page_size=100`,
+    {
+      headers: {
+        Authorization: getBasicAuthHeader(projectId, apiToken),
+      },
+    }
+  )
+
+  if (!response.ok) {
+    const text = await response.text()
+    throw new Error(
+      `SignalWire phone routes lookup failed (${response.status}): ${text}`
+    )
+  }
+
+  const payload = (await response.json()) as {
+    data?: SignalWirePhoneRoute[]
+  }
+
+  const routes = payload.data || []
+  return routes.find((route) => {
+    const routeNumber =
+      normalizePhoneNumber(route.phone_number || '') ||
+      normalizePhoneNumber(route.number || '') ||
+      normalizePhoneNumber(route.name || '')
+    return routeNumber === normalizedPhone
+  }) || null
+}
+
+async function assignPhoneRouteToSubscriber(
+  subscriberId: string,
+  phoneRouteId: string
+) {
+  const { apiToken, projectId, spaceHost } = getSignalWireAdminConfig()
+
+  const response = await fetch(
+    `https://${spaceHost}/api/fabric/resources/${subscriberId}/phone_routes`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: getBasicAuthHeader(projectId, apiToken),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        phone_route_id: phoneRouteId,
+        handler: 'calling',
+      }),
+    }
+  )
+
+  if (!response.ok) {
+    const text = await response.text()
+    throw new Error(
+      `SignalWire phone route assignment failed (${response.status}): ${text}`
+    )
+  }
+
+  return (await response.json()) as SignalWireAddress
+}
+
 async function resolveOutboundAddressForReference(reference: string, phoneNumber: string) {
   const subscriber = await createSubscriberSessionByReference(reference)
-  const addressId = await resolveSignalWireOutboundAddressIdForToken(
-    subscriber.token,
-    phoneNumber,
-    subscriber.fabric_addresses
+  // Only use the subscriber's own fabric_addresses — do NOT fall back to the
+  // global address list, because addresses from other subscribers would cause a
+  // "from_fabric_address_id_does_not_match_subscriber" error at dial time.
+  let addressId = findSignalWireOutboundAddressId(
+    subscriber.fabric_addresses,
+    phoneNumber
   )
+
+  // If no address exists, assign the phone route to this subscriber
+  if (!addressId) {
+    try {
+      const phoneRoute = await findPhoneRouteForNumber(phoneNumber)
+      if (phoneRoute) {
+        const assigned = await assignPhoneRouteToSubscriber(
+          subscriber.id,
+          phoneRoute.id
+        )
+        addressId = assigned.id || null
+        console.log('[SignalWire] Assigned phone route to subscriber:', {
+          subscriberId: subscriber.id,
+          phoneRouteId: phoneRoute.id,
+          addressId,
+        })
+      } else {
+        console.warn('[SignalWire] No phone route found for number:', phoneNumber)
+      }
+    } catch (error) {
+      console.error('[SignalWire] Failed to assign phone route to subscriber:', error)
+    }
+  }
 
   return {
     subscriberId: subscriber.id,
