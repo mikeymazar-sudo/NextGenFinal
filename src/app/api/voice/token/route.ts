@@ -10,10 +10,6 @@ import { createAdminClient } from '@/lib/supabase/server'
 
 export const runtime = 'nodejs'
 
-type SignalWireAddressListResponse = {
-  data?: SignalWireAddress[]
-}
-
 export const GET = withAuth(async (req: NextRequest, { user }) => {
   try {
     const {
@@ -22,6 +18,7 @@ export const GET = withAuth(async (req: NextRequest, { user }) => {
       projectId,
       apiToken,
       phoneNumber,
+      subscriberReference,
     } = getSignalWireEnv()
 
     if (!spaceHost || !projectId || !apiToken) {
@@ -33,7 +30,8 @@ export const GET = withAuth(async (req: NextRequest, { user }) => {
     }
 
     const credentials = Buffer.from(`${projectId}:${apiToken}`).toString('base64')
-    const activeSubscriberReference = user.id
+    const activeSubscriberReference =
+      phoneNumber && subscriberReference ? subscriberReference : user.id
 
     const response = await fetch(
       `https://${spaceHost}/api/fabric/subscribers/tokens`,
@@ -67,9 +65,9 @@ export const GET = withAuth(async (req: NextRequest, { user }) => {
 
     const data = await response.json()
 
-    if (phoneNumber && fabricHost) {
-      const addressResponse = await fetch(
-        `https://${fabricHost}/api/fabric/addresses?page_size=100`,
+    if (phoneNumber && fabricHost && subscriberReference) {
+      const subscriberInfoResponse = await fetch(
+        `https://${fabricHost}/api/fabric/subscriber/info`,
         {
           headers: {
             Authorization: `Bearer ${data.token}`,
@@ -77,26 +75,30 @@ export const GET = withAuth(async (req: NextRequest, { user }) => {
         }
       )
 
-      if (!addressResponse.ok) {
-        const text = await addressResponse.text()
+      if (!subscriberInfoResponse.ok) {
+        const text = await subscriberInfoResponse.text()
         console.error(
-          'SignalWire address lookup error:',
-          addressResponse.status,
+          'SignalWire subscriber info error:',
+          subscriberInfoResponse.status,
           text
         )
-        return Errors.externalApi('SignalWire', { status: addressResponse.status })
+        return Errors.externalApi('SignalWire', {
+          status: subscriberInfoResponse.status,
+        })
       }
 
-      const addressData =
-        (await addressResponse.json()) as SignalWireAddressListResponse
+      const subscriberInfo =
+        (await subscriberInfoResponse.json()) as {
+          fabric_addresses?: SignalWireAddress[]
+        }
       const sharedOutboundAddressId = findSignalWireOutboundAddressId(
-        addressData.data || [],
+        subscriberInfo.fabric_addresses || [],
         phoneNumber
       )
 
       if (!sharedOutboundAddressId) {
         return apiError(
-          'SignalWire outbound audio address not found for SIGNALWIRE_PHONE_NUMBER.',
+          'SignalWire outbound audio address was not found for SIGNALWIRE_PHONE_NUMBER on the configured SIGNALWIRE_SUBSCRIBER_REFERENCE.',
           'VOICE_OUTBOUND_NOT_CONFIGURED',
           503
         )
