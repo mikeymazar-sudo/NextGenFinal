@@ -374,24 +374,23 @@ async function resolveOutboundAddressForReference(reference: string, phoneNumber
 
   // If no address exists, assign the phone route to this subscriber
   if (!addressId) {
+    console.log('[SignalWire] No address on subscriber, attempting phone route assignment for', phoneNumber)
     try {
       const phoneRoute = await findPhoneRouteForNumber(phoneNumber)
       if (phoneRoute) {
+        console.log('[SignalWire] Found phone route:', JSON.stringify(phoneRoute))
         const assigned = await assignPhoneRouteToSubscriber(
           subscriber.id,
           phoneRoute.id
         )
+        console.log('[SignalWire] Assignment response:', JSON.stringify(assigned))
         addressId = assigned.id || null
-        console.log('[SignalWire] Assigned phone route to subscriber:', {
-          subscriberId: subscriber.id,
-          phoneRouteId: phoneRoute.id,
-          addressId,
-        })
       } else {
-        console.warn('[SignalWire] No phone route found for number:', phoneNumber)
+        console.error('[SignalWire] NO_ROUTE_FOUND for number:', phoneNumber)
       }
     } catch (error) {
-      console.error('[SignalWire] Failed to assign phone route to subscriber:', error)
+      const msg = error instanceof Error ? error.message : String(error)
+      console.error('[SignalWire] ROUTE_ASSIGN_ERROR:', msg)
     }
   }
 
