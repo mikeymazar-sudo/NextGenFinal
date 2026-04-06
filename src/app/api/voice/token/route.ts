@@ -2,15 +2,26 @@ import { NextRequest } from 'next/server'
 import { withAuth } from '@/lib/auth/middleware'
 import { apiError, apiSuccess, Errors } from '@/lib/api/response'
 import { getSignalWireEnv } from '@/lib/signalwire/config'
+import {
+  findSignalWireOutboundAddressId,
+  type SignalWireAddress,
+} from '@/lib/signalwire/shared'
 import { createAdminClient } from '@/lib/supabase/server'
-import { ensureUserPhoneNumberForUser } from '@/lib/signalwire/user-phone-numbers'
+
+export const runtime = 'nodejs'
+
+type SignalWireAddressListResponse = {
+  data?: SignalWireAddress[]
+}
 
 export const GET = withAuth(async (req: NextRequest, { user }) => {
   try {
     const {
       spaceHost,
+      fabricHost,
       projectId,
       apiToken,
+      phoneNumber,
     } = getSignalWireEnv()
 
     if (!spaceHost || !projectId || !apiToken) {
@@ -22,28 +33,6 @@ export const GET = withAuth(async (req: NextRequest, { user }) => {
     }
 
     const credentials = Buffer.from(`${projectId}:${apiToken}`).toString('base64')
-    const supabase = createAdminClient()
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('full_name')
-      .eq('id', user.id)
-      .maybeSingle()
-
-    const assignment = await ensureUserPhoneNumberForUser({
-      userId: user.id,
-      userEmail: user.email,
-      fullName: profile?.full_name || null,
-      request: req,
-    })
-
-    if (!assignment.phone_number) {
-      return apiError(
-        'Your dedicated phone number has not finished provisioning yet.',
-        'VOICE_NUMBER_NOT_READY',
-        503
-      )
-    }
-
     const activeSubscriberReference = user.id
 
     const response = await fetch(
@@ -77,6 +66,76 @@ export const GET = withAuth(async (req: NextRequest, { user }) => {
     }
 
     const data = await response.json()
+
+    if (phoneNumber && fabricHost) {
+      const addressResponse = await fetch(
+        `https://${fabricHost}/api/fabric/addresses?page_size=100`,
+        {
+          headers: {
+            Authorization: `Bearer ${data.token}`,
+          },
+        }
+      )
+
+      if (!addressResponse.ok) {
+        const text = await addressResponse.text()
+        console.error(
+          'SignalWire address lookup error:',
+          addressResponse.status,
+          text
+        )
+        return Errors.externalApi('SignalWire', { status: addressResponse.status })
+      }
+
+      const addressData =
+        (await addressResponse.json()) as SignalWireAddressListResponse
+      const sharedOutboundAddressId = findSignalWireOutboundAddressId(
+        addressData.data || [],
+        phoneNumber
+      )
+
+      if (!sharedOutboundAddressId) {
+        return apiError(
+          'SignalWire outbound audio address not found for SIGNALWIRE_PHONE_NUMBER.',
+          'VOICE_OUTBOUND_NOT_CONFIGURED',
+          503
+        )
+      }
+
+      return apiSuccess({
+        token: data.token,
+        identity: user.id,
+        outboundAddressId: sharedOutboundAddressId,
+        phoneNumber,
+        phoneNumberId: null,
+      })
+    }
+
+    const { ensureUserPhoneNumberForUser } = await import(
+      '@/lib/signalwire/user-phone-numbers'
+    )
+    const supabase = createAdminClient()
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('full_name')
+      .eq('id', user.id)
+      .maybeSingle()
+
+    const assignment = await ensureUserPhoneNumberForUser({
+      userId: user.id,
+      userEmail: user.email,
+      fullName: profile?.full_name || null,
+      request: req,
+    })
+
+    if (!assignment.phone_number) {
+      return apiError(
+        'Your dedicated phone number has not finished provisioning yet.',
+        'VOICE_NUMBER_NOT_READY',
+        503
+      )
+    }
+
     const outboundAddressId = assignment.signalwire_address_id
 
     if (!outboundAddressId) {
@@ -94,9 +153,15 @@ export const GET = withAuth(async (req: NextRequest, { user }) => {
       outboundAddressId,
       phoneNumber: assignment.phone_number,
       phoneNumberId: assignment.id,
-    })
+      })
   } catch (error) {
     console.error('Voice token error:', error)
-    return Errors.internal()
+    return apiError(
+      error instanceof Error && error.message.trim()
+        ? error.message
+        : 'Voice token setup failed.',
+      'VOICE_TOKEN_ERROR',
+      500
+    )
   }
 })
