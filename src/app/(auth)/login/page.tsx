@@ -9,15 +9,36 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Building2, Loader2 } from 'lucide-react'
 
-const AUTH_COOKIE_PREFIX = 'supabase.auth.token'
+function getAuthCookiePrefixes() {
+  const prefixes = ['supabase.auth.token']
+
+  try {
+    const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL
+
+    if (supabaseUrl) {
+      const projectRef = new URL(supabaseUrl).hostname.split('.')[0]
+      prefixes.unshift(`sb-${projectRef}-auth-token`)
+    }
+  } catch {
+    // Ignore malformed env values and fall back to the legacy prefix.
+  }
+
+  return prefixes
+}
 
 async function waitForAuthCookie(timeoutMs = 1500) {
   const deadline = Date.now() + timeoutMs
+  const authCookiePrefixes = getAuthCookiePrefixes()
 
   while (Date.now() < deadline) {
     const hasAuthCookie = document.cookie
       .split('; ')
-      .some((cookie) => cookie.startsWith(AUTH_COOKIE_PREFIX))
+      .map((cookie) => cookie.split('=')[0] ?? '')
+      .some((name) =>
+        authCookiePrefixes.some(
+          (prefix) => name === prefix || name.startsWith(`${prefix}.`)
+        )
+      )
 
     if (hasAuthCookie) {
       return true
