@@ -331,6 +331,35 @@ async function findPhoneRouteForNumber(phoneNumber: string) {
   }) || null
 }
 
+async function createPhoneRouteForNumber(phoneNumber: string) {
+  const { apiToken, projectId, spaceHost } = getSignalWireAdminConfig()
+  const normalizedPhone = normalizePhoneNumber(phoneNumber) || phoneNumber
+
+  const response = await fetch(
+    `https://${spaceHost}/api/fabric/phone_routes`,
+    {
+      method: 'POST',
+      headers: {
+        Authorization: getBasicAuthHeader(projectId, apiToken),
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: normalizedPhone,
+        number: normalizedPhone,
+      }),
+    }
+  )
+
+  if (!response.ok) {
+    const text = await response.text()
+    throw new Error(
+      `SignalWire phone route creation failed (${response.status}): ${text}`
+    )
+  }
+
+  return (await response.json()) as SignalWirePhoneRoute
+}
+
 async function assignPhoneRouteToSubscriber(
   subscriberId: string,
   phoneRouteId: string
@@ -376,17 +405,21 @@ async function resolveOutboundAddressForReference(reference: string, phoneNumber
   if (!addressId) {
     console.log('[SignalWire] No address on subscriber, attempting phone route assignment for', phoneNumber)
     try {
-      const phoneRoute = await findPhoneRouteForNumber(phoneNumber)
-      if (phoneRoute) {
+      let phoneRoute = await findPhoneRouteForNumber(phoneNumber)
+      if (!phoneRoute) {
+        console.log('[SignalWire] No phone route found, creating one for', phoneNumber)
+        phoneRoute = await createPhoneRouteForNumber(phoneNumber)
+        console.log('[SignalWire] Created phone route:', JSON.stringify(phoneRoute))
+      } else {
         console.log('[SignalWire] Found phone route:', JSON.stringify(phoneRoute))
+      }
+      if (phoneRoute?.id) {
         const assigned = await assignPhoneRouteToSubscriber(
           subscriber.id,
           phoneRoute.id
         )
         console.log('[SignalWire] Assignment response:', JSON.stringify(assigned))
         addressId = assigned.id || null
-      } else {
-        console.error('[SignalWire] NO_ROUTE_FOUND for number:', phoneNumber)
       }
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error)
