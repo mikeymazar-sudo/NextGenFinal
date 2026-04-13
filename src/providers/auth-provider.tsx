@@ -27,47 +27,26 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
   const [user, setUser] = useState<User | null>(initialUser)
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [session, setSession] = useState<Session | null>(null)
-  const [loading, setLoading] = useState(false)
-  const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null)
+  // Start true so the protected layout waits for auth to resolve before
+  // deciding to redirect. Start false only if SSR already hydrated a user.
+  const [loading, setLoading] = useState(!initialUser)
+  const supabaseRef = useRef(createClient())
   const fetchedProfileUserIdRef = useRef<string | null>(null)
   const inFlightProfileUserIdRef = useRef<string | null>(null)
   const inFlightProfileRequestRef = useRef<Promise<void> | null>(null)
 
-  const getSupabase = useCallback(() => {
-    if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
-      return null
-    }
-
-    if (!supabaseRef.current) {
-      supabaseRef.current = createClient()
-    }
-
-    return supabaseRef.current
-  }, [])
-
   const fetchProfile = useCallback(async (userId: string, { force = false }: { force?: boolean } = {}) => {
-    const supabase = getSupabase()
-
-    if (!supabase) {
-      return
-    }
+    const supabase = supabaseRef.current
 
     if (!force) {
-      if (fetchedProfileUserIdRef.current === userId) {
-        return
-      }
-
-      if (
-        inFlightProfileRequestRef.current &&
-        inFlightProfileUserIdRef.current === userId
-      ) {
+      if (fetchedProfileUserIdRef.current === userId) return
+      if (inFlightProfileRequestRef.current && inFlightProfileUserIdRef.current === userId) {
         await inFlightProfileRequestRef.current
         return
       }
     }
 
     let profileRequest: Promise<void> | null = null
-
     profileRequest = (async () => {
       try {
         const { data, error } = await supabase
@@ -95,73 +74,52 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
 
     inFlightProfileUserIdRef.current = userId
     inFlightProfileRequestRef.current = profileRequest
-
     await profileRequest
-  }, [getSupabase])
+  }, [])
 
   const refreshProfile = useCallback(async () => {
-    if (user) {
-      await fetchProfile(user.id, { force: true })
-    }
+    if (user) await fetchProfile(user.id, { force: true })
   }, [user, fetchProfile])
 
   useEffect(() => {
-    const supabase = getSupabase()
+    const supabase = supabaseRef.current
     let mounted = true
 
-    if (!supabase) {
-      return () => {
-        mounted = false
-      }
-    }
-
-    const syncAuth = async () => {
+    const initAuth = async () => {
       try {
-        const {
-          data: { user: currentUser },
-          error,
-        } = await supabase.auth.getUser()
+        // Use getSession (reads local cookie, no server call, no rate-limit risk).
+        // Middleware validates the session server-side on every request.
+        const { data: { session: currentSession } } = await supabase.auth.getSession()
 
-        if (!mounted) {
-          return
-        }
+        if (!mounted) return
 
-        if (error && !/auth session missing/i.test(error.message)) {
-          console.error('Auth sync error:', error.message)
-        }
+        setSession(currentSession)
+        setUser(currentSession?.user ?? null)
 
-        setUser(currentUser ?? null)
-
-        if (currentUser) {
-          void fetchProfile(currentUser.id)
-        } else {
-          fetchedProfileUserIdRef.current = null
-          inFlightProfileUserIdRef.current = null
-          inFlightProfileRequestRef.current = null
-          setSession(null)
-          setProfile(null)
+        if (currentSession?.user) {
+          await fetchProfile(currentSession.user.id)
         }
       } catch (err) {
-        console.error('Auth sync exception:', err)
+        console.error('Init auth error:', err)
+      } finally {
+        if (mounted) setLoading(false)
       }
     }
 
-    void syncAuth()
+    initAuth()
 
+    // Handle all auth state changes — do NOT skip INITIAL_SESSION because
+    // that is the event that fires on page refresh with the hydrated session.
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event: AuthChangeEvent, newSession: Session | null) => {
-        if (!mounted || event === 'INITIAL_SESSION') return
+        if (!mounted) return
 
         setSession(newSession)
         setUser(newSession?.user ?? null)
         setLoading(false)
 
         if (newSession?.user) {
-          if (event === 'SIGNED_IN' || event === 'USER_UPDATED') {
-            void fetchProfile(newSession.user.id, {
-              force: event === 'USER_UPDATED',
-            })
-          }
+          void fetchProfile(newSession.user.id, { force: event === 'USER_UPDATED' })
         } else {
           fetchedProfileUserIdRef.current = null
           inFlightProfileUserIdRef.current = null
@@ -169,9 +127,7 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
           setProfile(null)
         }
 
-        if (event === 'SIGNED_OUT') {
-          setProfile(null)
-        }
+        if (event === 'SIGNED_OUT') setProfile(null)
       }
     )
 
@@ -179,53 +135,31 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
       mounted = false
       subscription.unsubscribe()
     }
-  }, [fetchProfile, getSupabase])
+  }, [fetchProfile])
 
   const signIn = async (email: string, password: string) => {
-    const supabase = getSupabase()
-
-    if (!supabase) {
-      return { error: 'Missing Supabase configuration.' }
-    }
-
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+    const { data, error } = await supabaseRef.current.auth.signInWithPassword({ email, password })
 
     if (!error) {
       setSession(data.session ?? null)
       setUser(data.user ?? null)
-
-      if (data.user) {
-        void fetchProfile(data.user.id)
-      }
+      if (data.user) void fetchProfile(data.user.id)
     }
 
     return { error: error?.message || null }
   }
 
   const signUp = async (email: string, password: string, fullName?: string) => {
-    const supabase = getSupabase()
-
-    if (!supabase) {
-      return { error: 'Missing Supabase configuration.' }
-    }
-
-    const { error } = await supabase.auth.signUp({
+    const { error } = await supabaseRef.current.auth.signUp({
       email,
       password,
-      options: {
-        data: { full_name: fullName },
-      },
+      options: { data: { full_name: fullName } },
     })
     return { error: error?.message || null }
   }
 
   const handleSignOut = async () => {
-    const supabase = getSupabase()
-
-    if (supabase) {
-      await supabase.auth.signOut()
-    }
-
+    await supabaseRef.current.auth.signOut()
     fetchedProfileUserIdRef.current = null
     inFlightProfileUserIdRef.current = null
     inFlightProfileRequestRef.current = null
