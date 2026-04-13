@@ -237,22 +237,9 @@ export function useTwilio({
         return
       }
 
-      await sw.online({
-        incomingCallHandlers: {
-          all: async (notification: IncomingCallNotification) => {
-            console.log('[SignalWire] Incoming call')
-            if (!mountedRef.current) return
-            const call = await notification.invite.accept({ audio: true, video: false })
-            setupCallHandlers(call)
-          }
-        }
-      })
-
-      if (!mountedRef.current) {
-        try { await sw.offline() } catch {}
-        return
-      }
-
+      // Power dialer is outbound-only — skip sw.online() which registers for
+      // incoming calls and requires a Fabric audio address to be configured.
+      // If outboundAddressId wasn't resolved server-side, try getSubscriberInfo.
       if (!outboundAddressId) {
         try {
           const subscriberInfo = await sw.getSubscriberInfo() as SignalWireSubscriberInfoResult
