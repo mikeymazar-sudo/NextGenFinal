@@ -17,7 +17,7 @@ function copySupabaseResponse(targetResponse: NextResponse, sourceResponse: Next
   return targetResponse
 }
 
-export async function proxy(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({
     request,
   })
@@ -27,7 +27,6 @@ export async function proxy(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        encode: 'tokens-only',
         getAll() {
           return request.cookies.getAll()
         },
