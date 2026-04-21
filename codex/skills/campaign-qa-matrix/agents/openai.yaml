@@ -1,0 +1,4 @@
+interface:
+  display_name: "Campaign QA Matrix"
+  short_description: "Manual verification and launch-readiness guidance for marketing flows"
+  default_prompt: "Use $campaign-qa-matrix to verify marketing command center flows, edge states, and launch readiness across APIs, UI, inbox, and analytics."

@@ -5,21 +5,28 @@ import { updateMessageStatus } from '@/lib/twilio/sms'
 export const runtime = 'nodejs'
 
 const signingKey = process.env.SIGNALWIRE_SIGNING_KEY
+const requiresWebhookSignature =
+  process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production'
 
 export async function POST(request: NextRequest) {
   try {
-    // Get the SignalWire signature for validation
     const signature = request.headers.get('x-signalwire-signature') || ''
     const url = request.url
 
-    // Parse form data from SignalWire webhook
     const formData = await request.formData()
     const params: Record<string, FormDataEntryValue> = {}
     formData.forEach((value, key) => {
       params[key] = value
     })
 
-    // Validate webhook authenticity
+    if (!signingKey && requiresWebhookSignature) {
+      console.error('SignalWire signing key is not configured')
+      return NextResponse.json(
+        { error: 'Webhook signing key is not configured' },
+        { status: 500 }
+      )
+    }
+
     if (signingKey) {
       const isValid = RestClient.validateRequest(
         signingKey,
@@ -34,7 +41,6 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Extract status details
     const {
       MessageSid,
       MessageStatus,
@@ -42,7 +48,13 @@ export async function POST(request: NextRequest) {
       ErrorMessage,
     } = params
 
-    // Update message status in database
+    if (!MessageSid || !MessageStatus) {
+      return NextResponse.json(
+        { error: 'Missing MessageSid or MessageStatus' },
+        { status: 400 }
+      )
+    }
+
     await updateMessageStatus(
       MessageSid?.toString() || '',
       MessageStatus?.toString() || '',

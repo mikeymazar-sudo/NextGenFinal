@@ -1,0 +1,4 @@
+interface:
+  display_name: "Endpoint Contract Audit"
+  short_description: "Audit marketing-adjacent route contracts, auth, and status semantics"
+  default_prompt: "Use $endpoint-contract-audit to audit or implement marketing-adjacent routes with consistent ownership, suppression, response envelopes, and channel status semantics."

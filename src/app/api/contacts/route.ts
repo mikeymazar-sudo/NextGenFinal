@@ -3,6 +3,8 @@ import { z } from 'zod'
 import { withAuth } from '@/lib/auth/middleware'
 import { apiSuccess, Errors } from '@/lib/api/response'
 import { createAdminClient } from '@/lib/supabase/server'
+import { resolveMarketingActor } from '@/lib/marketing/actor'
+import { requirePropertyOwnership } from '@/lib/marketing/ownership'
 
 const AddContactSchema = z.object({
     propertyId: z.string().uuid(),
@@ -21,28 +23,14 @@ export const GET = withAuth(async (req: NextRequest, { user }) => {
         }
 
         const supabase = createAdminClient()
+        const actor = await resolveMarketingActor(user.id, { supabase, email: user.email })
+        const propertyAccess = await requirePropertyOwnership(user.id, propertyId, {
+            supabase,
+            actor,
+        })
 
-        const { data: profile } = await supabase
-            .from('profiles')
-            .select('team_id, role')
-            .eq('id', user.id)
-            .single()
-
-        let propertyQuery = supabase
-            .from('properties')
-            .select('id')
-            .eq('id', propertyId)
-
-        if (profile?.team_id && profile.role === 'admin') {
-            propertyQuery = propertyQuery.or(`created_by.eq.${user.id},team_id.eq.${profile.team_id}`)
-        } else {
-            propertyQuery = propertyQuery.eq('created_by', user.id)
-        }
-
-        const { data: property, error: propertyError } = await propertyQuery.single()
-
-        if (propertyError || !property) {
-            return Errors.notFound('Property')
+        if (!propertyAccess.ok) {
+            return propertyAccess.response
         }
 
         const { data: contacts, error: contactsError } = await supabase
@@ -62,7 +50,7 @@ export const GET = withAuth(async (req: NextRequest, { user }) => {
     }
 })
 
-export const POST = withAuth(async (req: NextRequest) => {
+export const POST = withAuth(async (req: NextRequest, { user }) => {
     try {
         const body = await req.json()
         const parsed = AddContactSchema.safeParse(body)
@@ -73,16 +61,15 @@ export const POST = withAuth(async (req: NextRequest) => {
 
         const { propertyId, type, value, label } = parsed.data
         const supabase = createAdminClient()
+        const actor = await resolveMarketingActor(user.id, { supabase, email: user.email })
 
-        // Verify the property exists
-        const { data: property, error: propError } = await supabase
-            .from('properties')
-            .select('id')
-            .eq('id', propertyId)
-            .single()
+        const propertyAccess = await requirePropertyOwnership(user.id, propertyId, {
+            supabase,
+            actor,
+        })
 
-        if (propError || !property) {
-            return Errors.notFound('Property')
+        if (!propertyAccess.ok) {
+            return propertyAccess.response
         }
 
         // Get existing contact for this property, or create a new one

@@ -14,7 +14,7 @@ import {
  */
 export const GET = withAuth(async (req: NextRequest, { user, params }) => {
   try {
-    const { traceId } = await params
+    const { traceId } = (await params) as { traceId: string }
     if (!traceId) return Errors.badRequest('Missing traceId')
 
     const supabase = createAdminClient()

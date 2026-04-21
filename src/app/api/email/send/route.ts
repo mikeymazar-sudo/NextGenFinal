@@ -4,16 +4,20 @@ import { withAuth } from '@/lib/auth/middleware'
 import { checkRateLimit } from '@/lib/api/rate-limit'
 import { apiError, apiSuccess, Errors } from '@/lib/api/response'
 import { createAdminClient } from '@/lib/supabase/server'
-import {
-  sendEmailFrom,
-  EMAIL_CONFIG,
-} from '@/lib/email/resend'
+import { sendEmailFrom } from '@/lib/email/resend'
 import {
   propertyDetailsTemplate,
   followUpTemplate,
   offerTemplate,
   baseEmailTemplate,
 } from '@/lib/email/templates'
+import { requirePropertyOwnership } from '@/lib/marketing/ownership'
+import {
+  normalizeEmailAddress,
+  normalizeEmailProviderStatus,
+  recordOutboundEmailCommunication,
+} from '@/lib/marketing/communications'
+import { checkMarketingSuppression } from '@/lib/marketing/suppression'
 
 const SendEmailSchema = z.object({
   to: z.string().email(),
@@ -28,7 +32,11 @@ const SendEmailSchema = z.object({
 
 export const POST = withAuth(async (req: NextRequest, { user }) => {
   try {
-    const body = await req.json()
+    const body = await req.json().catch(() => null)
+    if (!body) {
+      return Errors.badRequest('Invalid JSON body.')
+    }
+
     const parsed = SendEmailSchema.safeParse(body)
 
     if (!parsed.success) {
@@ -60,16 +68,25 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
       .single()
 
     const senderName = profile?.full_name || profile?.email || 'NextGen Realty'
-    const agentEmail = replyTo || profile?.email
+    const agentEmail = normalizeEmailAddress(replyTo || profile?.email || null)
 
-    // Get property if provided
     let property: Record<string, unknown> | null = null
     if (propertyId) {
-      const { data } = await supabase
+      const propertyAccess = await requirePropertyOwnership(user.id, propertyId, { supabase })
+      if (!propertyAccess.ok) {
+        return propertyAccess.response
+      }
+
+      const { data, error } = await supabase
         .from('properties')
         .select('*')
         .eq('id', propertyId)
         .single()
+
+      if (error) {
+        return Errors.internal(error.message)
+      }
+
       property = data
     }
 
@@ -136,8 +153,28 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
       emailHtml = baseEmailTemplate(customHtml || message || '')
     }
 
+    const normalizedRecipient = normalizeEmailAddress(to)
+    if (!normalizedRecipient) {
+      return Errors.badRequest('Invalid email address.')
+    }
+
+    const suppression = await checkMarketingSuppression({
+      channel: 'email',
+      destination: normalizedRecipient,
+      ownerUserId: user.id,
+    })
+
+    if (!suppression.allowed) {
+      return apiError(
+        'Destination is globally suppressed for email.',
+        'SUPPRESSED',
+        403,
+        suppression.matchedSuppression
+      )
+    }
+
     const result = await sendEmailFrom(senderName, {
-      to,
+      to: normalizedRecipient,
       subject: emailSubject,
       html: emailHtml,
       ...(agentEmail && { replyTo: agentEmail }),
@@ -155,21 +192,21 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
       return apiError(resendMsg, 'EXTERNAL_API_ERROR', 502, result.error)
     }
 
-    // Log to communication_logs
-    if (propertyId) {
-      await supabase.from('communication_logs').insert({
-        property_id: propertyId,
-        user_id: user.id,
-        type: 'email',
-        direction: 'outbound',
-        subject: emailSubject,
-        content: emailHtml,
-        recipient: to,
-        status: 'sent',
-      })
+    const logResult = await recordOutboundEmailCommunication({
+      userId: user.id,
+      propertyId: propertyId || null,
+      to: normalizedRecipient,
+      subject: emailSubject,
+      content: emailHtml,
+      status: normalizeEmailProviderStatus('sent'),
+      supabase,
+    })
+
+    if (!logResult.success) {
+      console.warn('Failed to log outbound email communication:', logResult.error)
     }
 
-    return apiSuccess({ sent: true, to, subject: emailSubject })
+    return apiSuccess({ sent: true, to: normalizedRecipient, subject: emailSubject })
   } catch (error) {
     console.error('Send email error:', error)
     return Errors.internal()

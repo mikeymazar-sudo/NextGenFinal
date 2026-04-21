@@ -335,6 +335,145 @@ export interface Message {
   property?: Property
 }
 
+export type MarketingChannel = 'sms' | 'email' | 'voice'
+
+export type CampaignLifecycleStatus =
+  | 'draft'
+  | 'review_required'
+  | 'approved'
+  | 'launching'
+  | 'active'
+  | 'partially_failed'
+  | 'completed'
+  | 'failed'
+  | 'archived'
+
+export type CampaignReviewState = 'draft' | 'review_required' | 'approved' | 'rejected'
+
+export type CampaignEligibilityStatus =
+  | 'eligible'
+  | 'suppressed'
+  | 'missing_destination'
+  | 'invalid_destination'
+  | 'duplicate'
+  | 'unowned'
+  | 'excluded'
+  | 'converted'
+
+export type NormalizedCommunicationStatus =
+  | 'queued'
+  | 'sent'
+  | 'delivered'
+  | 'replied'
+  | 'answered'
+  | 'voicemail_left'
+  | 'failed'
+  | 'suppressed'
+  | 'bounced'
+  | 'no_answer'
+
+export type CommunicationDirection = 'inbound' | 'outbound'
+
+export type CampaignStepExecutionStatus = NormalizedCommunicationStatus | 'skipped'
+
+export type GlobalSuppressionStatus = 'active' | 'resolved'
+
+export type VoicemailAssetStatus = 'draft' | 'ready' | 'archived' | 'failed'
+
+export interface Campaign {
+  id: string
+  owner_user_id: string
+  team_id: string | null
+  name: string
+  channel: MarketingChannel
+  status: CampaignLifecycleStatus
+  review_state: CampaignReviewState
+  launch_state: string
+  audience_source_type: string | null
+  audience_source_id: string | null
+  draft_payload: Record<string, unknown>
+  launched_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface CampaignStep {
+  id: string
+  campaign_id: string
+  step_order: number
+  channel: MarketingChannel
+  action_type: string
+  content_payload: Record<string, unknown>
+  template_label: string | null
+  voicemail_asset_id: string | null
+  review_state: CampaignReviewState
+  execution_status: CampaignStepExecutionStatus
+  created_at: string
+  updated_at: string
+}
+
+export interface CampaignEnrollment {
+  id: string
+  campaign_id: string
+  property_id: string
+  contact_id: string | null
+  eligibility_status: CampaignEligibilityStatus
+  eligibility_reason: string | null
+  review_state: CampaignReviewState
+  delivery_status: NormalizedCommunicationStatus
+  last_communication_id: string | null
+  latest_channel: MarketingChannel | null
+  source_type: string
+  source_id: string
+  created_at: string
+  updated_at: string
+}
+
+export interface CommunicationThread {
+  id: string
+  owner_user_id: string
+  property_id: string | null
+  contact_id: string | null
+  campaign_id: string | null
+  thread_key: string
+  primary_channel: MarketingChannel
+  last_direction: CommunicationDirection
+  last_status: NormalizedCommunicationStatus
+  last_event_at: string
+  unread_count: number
+  needs_reply: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface GlobalSuppression {
+  id: string
+  owner_user_id: string
+  property_id: string | null
+  contact_id: string | null
+  channel: MarketingChannel
+  destination: string
+  reason: string | null
+  source: string
+  status: GlobalSuppressionStatus
+  suppressed_at: string
+  resolved_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface VoicemailAsset {
+  id: string
+  owner_user_id: string
+  label: string
+  storage_path: string
+  duration_seconds: number | null
+  transcript: string | null
+  status: VoicemailAssetStatus
+  created_at: string
+  updated_at: string
+}
+
 export interface ActivityItem {
   id: string
   type: 'note' | 'email' | 'call' | 'sms' | 'status_change'

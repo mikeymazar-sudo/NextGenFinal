@@ -5,6 +5,8 @@ import { storeIncomingMessage } from '@/lib/twilio/sms'
 export const runtime = 'nodejs'
 
 const signingKey = process.env.SIGNALWIRE_SIGNING_KEY
+const requiresWebhookSignature =
+  process.env.NODE_ENV === 'production' || process.env.VERCEL_ENV === 'production'
 
 export async function POST(request: NextRequest) {
   try {
@@ -16,6 +18,11 @@ export async function POST(request: NextRequest) {
     formData.forEach((value, key) => {
       params[key] = value
     })
+
+    if (!signingKey && requiresWebhookSignature) {
+      console.error('SignalWire signing key is not configured')
+      return new NextResponse('Webhook signing key is not configured', { status: 500 })
+    }
 
     if (signingKey) {
       const isValid = RestClient.validateRequest(signingKey, signature, url, params)
@@ -35,6 +42,10 @@ export async function POST(request: NextRequest) {
       NumSegments,
       SmsStatus,
     } = params
+
+    if (!From || !To) {
+      return new NextResponse('Missing From or To', { status: 400 })
+    }
 
     const mediaUrls: string[] = []
     const numMedia = parseInt(NumMedia?.toString() || '0', 10)

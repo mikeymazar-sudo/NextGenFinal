@@ -6,6 +6,11 @@ import {
   getUserPhoneNumberByNumber,
   type UserPhoneNumberRecord,
 } from '@/lib/signalwire/user-phone-numbers'
+import {
+  applyInboundSmsSuppressionKeyword,
+  normalizeSmsProviderStatus,
+} from '@/lib/marketing/communications'
+import { checkMarketingSuppression } from '@/lib/marketing/suppression'
 
 function getSignalWireClient() {
   const projectId = process.env.SIGNALWIRE_PROJECT_ID
@@ -75,6 +80,7 @@ export interface SendSMSParams {
   userId: string
   userEmail?: string | null
   fullName?: string | null
+  ownerUserId?: string | null
   to: string
   body: string
   contactId?: string
@@ -89,6 +95,8 @@ export interface SMSResult {
   messageSid?: string
   error?: string
   messageId?: string
+  errorCode?: string
+  status?: number
 }
 
 /**
@@ -99,6 +107,7 @@ export async function sendSMS(params: SendSMSParams): Promise<SMSResult> {
     userId,
     userEmail,
     fullName,
+    ownerUserId,
     to,
     body,
     contactId,
@@ -127,6 +136,21 @@ export async function sendSMS(params: SendSMSParams): Promise<SMSResult> {
     throw new Error('Phone number must be in E.164 format (e.g., +1234567890)')
   }
 
+  const suppression = await checkMarketingSuppression({
+    channel: 'sms',
+    destination: normalizedTo,
+    ownerUserId: ownerUserId || userId,
+  })
+
+  if (!suppression.allowed) {
+    return {
+      success: false,
+      error: 'Destination is globally suppressed for SMS.',
+      errorCode: 'SUPPRESSED',
+      status: 403,
+    }
+  }
+
   const statusCallback = buildStatusCallbackUrl(request)
 
   try {
@@ -144,7 +168,7 @@ export async function sendSMS(params: SendSMSParams): Promise<SMSResult> {
       .insert({
         body,
         direction: 'outbound',
-        status: message.status,
+        status: normalizeSmsProviderStatus(message.status),
         from_number: fromNumber,
         to_number: normalizedTo,
         twilio_sid: message.sid,
@@ -278,12 +302,23 @@ export async function storeIncomingMessage(params: {
 
   const contact = await findContactByPhoneNumber(assignment.user_id, normalizedFrom)
   const supabase = createAdminClient()
+  const suppressionKeywordResult = await applyInboundSmsSuppressionKeyword({
+    ownerUserId: assignment.user_id,
+    destination: normalizedFrom,
+    body: params.body,
+    contactId: contact?.id || null,
+    propertyId: contact?.property_id || null,
+    supabase,
+  })
+
   const { error } = await supabase
     .from('messages')
     .insert({
       body: params.body,
       direction: 'inbound',
-      status: 'received',
+      status: params.smsStatus
+        ? normalizeSmsProviderStatus(params.smsStatus)
+        : 'received',
       from_number: normalizedFrom,
       to_number: normalizedTo,
       twilio_sid: params.messageSid || null,
@@ -305,6 +340,7 @@ export async function storeIncomingMessage(params: {
   return {
     stored: true as const,
     assignment,
+    suppressionKeywordResult,
   }
 }
 
@@ -315,11 +351,12 @@ export async function updateMessageStatus(
   errorMessage?: string
 ) {
   const supabase = createAdminClient()
+  const normalizedStatus = normalizeSmsProviderStatus(status)
 
   const { error } = await supabase
     .from('messages')
     .update({
-      status,
+      status: normalizedStatus,
       twilio_status: status,
       error_code: errorCode || null,
       error_message: errorMessage || null,

@@ -3,6 +3,8 @@ import { z } from 'zod'
 import { withAuth } from '@/lib/auth/middleware'
 import { apiSuccess, Errors } from '@/lib/api/response'
 import { createAdminClient } from '@/lib/supabase/server'
+import { resolveMarketingActor } from '@/lib/marketing/actor'
+import { requireCallOwnership, requirePropertyOwnership } from '@/lib/marketing/ownership'
 
 const UpdateCallSchema = z.object({
   notes: z.string().optional(),
@@ -23,6 +25,27 @@ export const PATCH = withAuth(async (req: NextRequest, { user }) => {
 
     const { notes, propertyId } = parsed.data
     const supabase = createAdminClient()
+    const actor = await resolveMarketingActor(user.id, { supabase, email: user.email })
+
+    const callAccess = await requireCallOwnership(user.id, id, {
+      supabase,
+      actor,
+    })
+
+    if (!callAccess.ok) {
+      return callAccess.response
+    }
+
+    if (propertyId !== undefined) {
+      const propertyAccess = await requirePropertyOwnership(user.id, propertyId, {
+        supabase,
+        actor,
+      })
+
+      if (!propertyAccess.ok) {
+        return propertyAccess.response
+      }
+    }
 
     const updateData: Record<string, unknown> = {}
     if (notes !== undefined) updateData.notes = notes

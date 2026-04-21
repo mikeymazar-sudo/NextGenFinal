@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { sendEmail, notificationTemplate } from '@/lib/email'
+import { normalizeEmailAddress } from '@/lib/marketing/communications'
 
 /**
  * Test email endpoint
@@ -22,9 +23,11 @@ export async function POST(req: NextRequest) {
       )
     }
 
+    const normalizedTo = normalizeEmailAddress(to)
+
     // Validate email format
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
-    if (!emailRegex.test(to)) {
+    if (!normalizedTo || !emailRegex.test(normalizedTo)) {
       return NextResponse.json(
         { error: 'Invalid email address format' },
         { status: 400 }
@@ -52,7 +55,7 @@ export async function POST(req: NextRequest) {
 
     // Send test email
     const result = await sendEmail({
-      to,
+      to: normalizedTo,
       subject,
       html,
       tags: [
@@ -75,7 +78,7 @@ export async function POST(req: NextRequest) {
       success: true,
       message: 'Test email sent successfully',
       emailId: result.data?.id,
-      to,
+      to: normalizedTo,
       timestamp: new Date().toISOString(),
     })
   } catch (error) {

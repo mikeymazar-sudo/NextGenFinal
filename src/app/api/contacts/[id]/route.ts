@@ -3,6 +3,8 @@ import { z } from 'zod'
 import { withAuth } from '@/lib/auth/middleware'
 import { apiSuccess, Errors } from '@/lib/api/response'
 import { createAdminClient } from '@/lib/supabase/server'
+import { resolveMarketingActor } from '@/lib/marketing/actor'
+import { requireContactOwnership } from '@/lib/marketing/ownership'
 
 interface PhoneEntry {
     value: string
@@ -45,7 +47,7 @@ const UpdateContactSchema = z.object({
 
 export const PATCH = withAuth(async (
     req: NextRequest,
-    { params }: { params: Promise<{ id: string }> }
+    { params, user }: { params: Promise<{ id: string }>; user: { id: string; email: string | null } }
 ) => {
     try {
         const { id } = await params
@@ -58,6 +60,16 @@ export const PATCH = withAuth(async (
 
         const { type, index, value, label, is_primary } = parsed.data
         const supabase = createAdminClient()
+        const actor = await resolveMarketingActor(user.id, { supabase, email: user.email })
+
+        const contactAccess = await requireContactOwnership(user.id, id, {
+            supabase,
+            actor,
+        })
+
+        if (!contactAccess.ok) {
+            return contactAccess.response
+        }
 
         // Get the contact
         const { data: contact, error: fetchError } = await supabase
@@ -70,7 +82,7 @@ export const PATCH = withAuth(async (
             return Errors.notFound('Contact')
         }
 
-        let updateData: Record<string, unknown> = {}
+        const updateData: Record<string, unknown> = {}
 
         if (type === 'phone') {
             const phones: PhoneEntry[] = normalizePhones(contact.phone_numbers || [])
@@ -131,7 +143,7 @@ export const PATCH = withAuth(async (
 
 export const DELETE = withAuth(async (
     req: NextRequest,
-    { params }: { params: Promise<{ id: string }> }
+    { params, user }: { params: Promise<{ id: string }>; user: { id: string; email: string | null } }
 ) => {
     try {
         const { id } = await params
@@ -144,6 +156,16 @@ export const DELETE = withAuth(async (
         }
 
         const supabase = createAdminClient()
+        const actor = await resolveMarketingActor(user.id, { supabase, email: user.email })
+
+        const contactAccess = await requireContactOwnership(user.id, id, {
+            supabase,
+            actor,
+        })
+
+        if (!contactAccess.ok) {
+            return contactAccess.response
+        }
 
         // Get the contact
         const { data: contact, error: fetchError } = await supabase
@@ -156,7 +178,7 @@ export const DELETE = withAuth(async (
             return Errors.notFound('Contact')
         }
 
-        let updateData: Record<string, unknown> = {}
+        const updateData: Record<string, unknown> = {}
 
         if (type === 'phone') {
             const phones: PhoneEntry[] = normalizePhones(contact.phone_numbers || [])

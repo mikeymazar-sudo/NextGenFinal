@@ -1,7 +1,10 @@
+import { randomUUID } from 'crypto';
 import { NextRequest } from 'next/server';
 import { createAdminClient } from '@/lib/supabase/server';
 import { withAuth } from '@/lib/auth/middleware';
 import { Errors, apiSuccess } from '@/lib/api/response';
+import { resolveMarketingActor } from '@/lib/marketing/actor';
+import { buildMarketingImportAudienceMetadata } from '@/lib/marketing/import-audience';
 
 type ImportedPropertyRow = Record<string, string | undefined>;
 type ImportedContactEntry = {
@@ -47,37 +50,36 @@ function collectUniqueEmails(row: ImportedPropertyRow): string[] {
 }
 
 export const POST = withAuth(async (req: NextRequest, { user }) => {
-    try {
-        const body = await req.json();
-        const { properties, listName } = body;
+	    try {
+	        const body = await req.json();
+	        const { properties, listName } = body;
 
         if (!properties || !Array.isArray(properties) || properties.length === 0) {
             return Errors.badRequest('No properties provided');
         }
 
-        const importedProperties = properties as ImportedPropertyRow[];
+	        const importedProperties = properties as ImportedPropertyRow[];
 
-        const supabase = createAdminClient();
+	        const supabase = createAdminClient();
+	        const actor = await resolveMarketingActor(user.id, {
+	            supabase,
+	            email: user.email ?? null,
+	        });
+	        const importBatchId = randomUUID();
+	        const importedAt = new Date().toISOString();
 
-        // 1. Get user profile to know who is importing
-        const { data: profile } = await supabase
-            .from('user_profiles')
-            .select('team_id, full_name')
-            .eq('id', user.id)
-            .single();
-
-        // 2. If listName provided, create the list
-        let listId: string | undefined;
-        if (listName) {
-            const { data: list, error: listError } = await supabase
-                .from('lead_lists')
-                .insert({
-                    name: listName,
-                    created_by: user.id,
-                    team_id: profile?.team_id,
-                })
-                .select('id')
-                .single();
+	        // 2. If listName provided, create the list
+	        let listId: string | undefined;
+	        if (listName) {
+	            const { data: list, error: listError } = await supabase
+	                .from('lead_lists')
+	                .insert({
+	                    name: listName,
+	                    created_by: user.id,
+	                    team_id: actor.teamId,
+	                })
+	                .select('id')
+	                .single();
 
             if (listError) {
                 console.error('List creation error:', listError);
@@ -94,20 +96,37 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
         const allPropertyIds: string[] = [];
 
         const batchSize = 100;
-        for (let i = 0; i < importedProperties.length; i += batchSize) {
-            const batch = importedProperties.slice(i, i + batchSize);
+	        for (let i = 0; i < importedProperties.length; i += batchSize) {
+	            const batch = importedProperties.slice(i, i + batchSize);
 
-            const rows = batch.map((p: ImportedPropertyRow) => {
-                const uniquePhones = collectUniquePhones(p);
-                const uniqueEmails = collectUniqueEmails(p);
-                const primaryPhone = uniquePhones[0] || null;
-                const primaryEmail = uniqueEmails[0] || null;
+	            const rows = batch.map((p: ImportedPropertyRow) => {
+	                const uniquePhones = collectUniquePhones(p);
+	                const uniqueEmails = collectUniqueEmails(p);
+	                const primaryPhone = uniquePhones[0] || null;
+	                const primaryEmail = uniqueEmails[0] || null;
+	                const marketingImport = buildMarketingImportAudienceMetadata(
+	                    p,
+	                    {
+	                        importBatchId,
+	                        ownerUserId: actor.id,
+	                        ownerTeamId: actor.teamId,
+	                        ownerFullName: actor.fullName,
+	                        listId: listId ?? null,
+	                        listName: listName ?? null,
+	                        importedAt,
+	                    },
+	                    {
+	                        uniquePhones,
+	                        uniqueEmails,
+	                    }
+	                );
 
-                // Construct the raw_realestate_data JSON to match NormalizedPropertyData structure
-                // This will allow the UI to automatically render these fields
-                const rawData = {
-                    data: {
-                        propertyInfo: {
+	                // Construct the raw_realestate_data JSON to match NormalizedPropertyData structure
+	                // This will allow the UI to automatically render these fields and keep the import
+	                // source explicit for campaign audience rebuilds.
+	                const rawData = {
+	                    data: {
+	                        propertyInfo: {
                             address: {
                                 street: p.address,
                                 city: p.city,
@@ -179,11 +198,12 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
                         },
                         estimatedValue: p.estimated_value ? Number(p.estimated_value.replace(/[^0-9.]/g, '')) : undefined,
                         estimatedEquity: p.estimated_equity ? Number(p.estimated_equity.replace(/[^0-9.]/g, '')) : undefined,
-                        demographics: {
-                            suggestedRent: p.suggested_rent ? Number(p.suggested_rent.replace(/[^0-9.]/g, '')) : undefined,
-                        }
-                    }
-                };
+	                        demographics: {
+	                            suggestedRent: p.suggested_rent ? Number(p.suggested_rent.replace(/[^0-9.]/g, '')) : undefined,
+	                        },
+	                        marketingImport,
+	                    }
+	                };
 
                 return {
                     address: p.address,
@@ -214,12 +234,12 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
                     mailing_zip: p.mailing_zip || null,
                     owner_phone: uniquePhones.length > 0 ? uniquePhones : null,
 
-                    status: 'new',
-                    created_by: user.id,
-                    team_id: profile?.team_id,
-                    list_id: listId,
-                    raw_realestate_data: rawData, // Store the JSON blob!
-                };
+	                    status: 'new',
+	                    created_by: user.id,
+	                    team_id: actor.teamId,
+	                    list_id: listId,
+	                    raw_realestate_data: rawData, // Store the JSON blob!
+	                };
             });
 
             if (rows.length > 0) {

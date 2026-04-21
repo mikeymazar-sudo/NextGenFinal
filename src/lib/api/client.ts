@@ -344,6 +344,106 @@ class ApiClient {
       body: JSON.stringify({ to, template, propertyId, subject, customHtml, replyTo, message, offerAmount }),
     })
   }
+
+  // Marketing
+  async getMarketingCommandCenter() {
+    return this.request<{
+      actor: Record<string, unknown>
+      campaigns: Record<string, unknown>[]
+      queue: Record<string, unknown>
+      audience: Record<string, unknown>
+      analytics: Record<string, number>
+      nextActions: Record<string, number>
+    }>('/api/marketing/command-center')
+  }
+
+  async getMarketingCampaigns() {
+    return this.request<{ campaigns: Record<string, unknown>[] }>('/api/marketing/campaigns')
+  }
+
+  async createMarketingCampaign(payload: {
+    name: string
+    channel: 'sms' | 'email' | 'voice'
+    audienceSourceType?: string
+    audienceSourceId?: string
+    draftPayload?: Record<string, unknown>
+    steps?: Record<string, unknown>[]
+  }) {
+    return this.request<{ campaign: Record<string, unknown>; steps: Record<string, unknown>[] }>('/api/marketing/campaigns', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
+  }
+
+  async getMarketingCampaign(campaignId: string) {
+    return this.request<{
+      campaign: Record<string, unknown>
+      steps: Record<string, unknown>[]
+      enrollments: Record<string, unknown>[]
+    }>(`/api/marketing/campaigns/${campaignId}`)
+  }
+
+  async updateMarketingCampaign(
+    campaignId: string,
+    payload: {
+      name?: string
+      audienceSourceType?: string | null
+      audienceSourceId?: string | null
+      draftPayload?: Record<string, unknown>
+      reviewState?: string
+    }
+  ) {
+    return this.request<{ campaign: Record<string, unknown> }>(`/api/marketing/campaigns/${campaignId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(payload),
+    })
+  }
+
+  async reviewMarketingCampaign(campaignId: string) {
+    return this.request<{
+      reviewState: string
+      audienceCount: number
+      reviewRows: Record<string, unknown>[]
+      counts: Record<string, number>
+    }>(`/api/marketing/campaigns/${campaignId}/review`, {
+      method: 'POST',
+    })
+  }
+
+  async launchMarketingCampaign(campaignId: string) {
+    return this.request<{
+      campaignId: string
+      launchState: string
+      queued: number
+      suppressed: number
+      skipped: number
+    }>(`/api/marketing/campaigns/${campaignId}/launch`, {
+      method: 'POST',
+    })
+  }
+
+  async getMarketingInbox(params?: { filter?: string; campaignId?: string }) {
+    const searchParams = new URLSearchParams()
+    if (params?.filter) searchParams.set('filter', params.filter)
+    if (params?.campaignId) searchParams.set('campaignId', params.campaignId)
+
+    const suffix = searchParams.toString() ? `?${searchParams.toString()}` : ''
+    return this.request<{
+      threads: Record<string, unknown>[]
+      filters: Record<string, number>
+    }>(`/api/marketing/inbox${suffix}`)
+  }
+
+  async getMarketingThread(threadId: string) {
+    return this.request<{
+      threadId: string
+      events: Record<string, unknown>[]
+    }>(`/api/marketing/inbox/${encodeURIComponent(threadId)}`)
+  }
+
+  async getMarketingAnalytics() {
+    return this.request<{ analytics: Record<string, number> }>('/api/marketing/analytics')
+  }
 }
 
 export const api = new ApiClient()

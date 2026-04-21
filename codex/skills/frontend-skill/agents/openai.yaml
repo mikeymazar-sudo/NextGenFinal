@@ -1,0 +1,4 @@
+interface:
+  display_name: "Frontend Skill"
+  short_description: "General frontend implementation support for product UI"
+  default_prompt: "Use $frontend-skill for general frontend implementation support, then defer repo-specific layout and state decisions to $ui-consistency-guardrails."

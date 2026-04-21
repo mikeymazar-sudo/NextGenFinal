@@ -2,6 +2,8 @@ import { NextRequest } from 'next/server'
 import { withAuth } from '@/lib/auth/middleware'
 import { apiSuccess, Errors } from '@/lib/api/response'
 import { createAdminClient } from '@/lib/supabase/server'
+import { resolveMarketingActor } from '@/lib/marketing/actor'
+import { requirePropertyOwnership } from '@/lib/marketing/ownership'
 import type { ActivityItem } from '@/types/schema'
 
 export const GET = withAuth(async (req: NextRequest, { user }) => {
@@ -14,7 +16,15 @@ export const GET = withAuth(async (req: NextRequest, { user }) => {
     }
 
     const supabase = createAdminClient()
-    void user
+    const actor = await resolveMarketingActor(user.id, { supabase, email: user.email })
+    const propertyAccess = await requirePropertyOwnership(user.id, propertyId, {
+      supabase,
+      actor,
+    })
+
+    if (!propertyAccess.ok) {
+      return propertyAccess.response
+    }
 
     // Fetch all activity sources in parallel
     const [notesRes, commLogsRes, activityLogRes, callsRes] = await Promise.all([
@@ -82,7 +92,7 @@ export const GET = withAuth(async (req: NextRequest, { user }) => {
     // Calls
     for (const call of callsRes.data || []) {
       const usr = call.caller as unknown as { full_name: string | null } | null
-      timeline.push({
+        timeline.push({
         id: call.id,
         type: 'call',
         content: call.notes || `Called ${call.to_number || 'unknown'} (${call.duration || 0}s)`,
@@ -90,7 +100,7 @@ export const GET = withAuth(async (req: NextRequest, { user }) => {
         user: usr?.full_name || null,
         created_at: call.created_at,
         callId: call.id,
-        recording_url: (call as any).recording_url || null,
+        recording_url: call.recording_url || null,
         duration: call.duration || 0,
       })
     }

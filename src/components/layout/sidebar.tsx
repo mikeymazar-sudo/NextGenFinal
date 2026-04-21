@@ -16,6 +16,8 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import {
   LayoutDashboard,
   Building2,
+  Phone,
+  Megaphone,
   Settings,
   LogOut,
   User,
@@ -26,6 +28,8 @@ import { DialerSidebarWidget } from '@/components/dialer/dialer-sidebar-widget'
 const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/leads', label: 'Leads', icon: Building2 },
+  { href: '/dialer', label: 'Dialer', icon: Phone },
+  { href: '/marketing', label: 'Marketing', icon: Megaphone },
   { href: '/settings', label: 'Settings', icon: Settings },
 ]
 

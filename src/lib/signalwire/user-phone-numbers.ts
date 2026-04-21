@@ -32,6 +32,31 @@ export interface UserPhoneNumberRecord {
   updated_at: string
 }
 
+export type PublicUserPhoneNumberRecord = Omit<
+  UserPhoneNumberRecord,
+  | 'provider'
+  | 'signalwire_incoming_phone_number_sid'
+  | 'signalwire_subscriber_id'
+  | 'signalwire_address_id'
+>
+
+export function toPublicUserPhoneNumber(
+  record: UserPhoneNumberRecord | null
+): PublicUserPhoneNumberRecord | null {
+  if (!record) return null
+
+  const publicRecord = {
+    ...record,
+  } as PublicUserPhoneNumberRecord & Record<string, unknown>
+
+  delete publicRecord.provider
+  delete publicRecord.signalwire_incoming_phone_number_sid
+  delete publicRecord.signalwire_subscriber_id
+  delete publicRecord.signalwire_address_id
+
+  return publicRecord as PublicUserPhoneNumberRecord
+}
+
 interface SignalWireSubscriberInfo {
   id: string
   fabric_addresses: SignalWireAddress[]

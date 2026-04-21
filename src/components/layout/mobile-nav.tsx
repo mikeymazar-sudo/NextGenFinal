@@ -18,6 +18,7 @@ import {
   LayoutDashboard,
   Building2,
   Phone,
+  Megaphone,
   Settings,
   LogOut,
 } from 'lucide-react'
@@ -26,6 +27,7 @@ const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { href: '/leads', label: 'Leads', icon: Building2 },
   { href: '/dialer', label: 'Dialer', icon: Phone },
+  { href: '/marketing', label: 'Marketing', icon: Megaphone },
   { href: '/settings', label: 'Settings', icon: Settings },
 ]
 

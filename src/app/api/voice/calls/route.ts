@@ -2,6 +2,8 @@ import { NextRequest } from 'next/server'
 import { withAuth } from '@/lib/auth/middleware'
 import { apiSuccess, Errors } from '@/lib/api/response'
 import { createAdminClient } from '@/lib/supabase/server'
+import { resolveMarketingActor } from '@/lib/marketing/actor'
+import { requirePropertyOwnership } from '@/lib/marketing/ownership'
 
 export const GET = withAuth(async (req: NextRequest, { user }) => {
     try {
@@ -13,6 +15,15 @@ export const GET = withAuth(async (req: NextRequest, { user }) => {
         }
 
         const supabase = createAdminClient()
+        const actor = await resolveMarketingActor(user.id, { supabase, email: user.email })
+        const propertyAccess = await requirePropertyOwnership(user.id, propertyId, {
+            supabase,
+            actor,
+        })
+
+        if (!propertyAccess.ok) {
+            return propertyAccess.response
+        }
 
         const { data: calls, error } = await supabase
             .from('calls')

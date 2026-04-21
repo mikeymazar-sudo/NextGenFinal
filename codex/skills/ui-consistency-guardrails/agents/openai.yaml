@@ -1,0 +1,4 @@
+interface:
+  display_name: "UI Consistency Guardrails"
+  short_description: "Repo-specific guardrails for protected-shell UI consistency"
+  default_prompt: "Use $ui-consistency-guardrails before building or reviewing protected-shell UI so the work stays aligned with the existing app shell, nav parity, state patterns, and terminology."

@@ -9,6 +9,22 @@ import {
 
 export const runtime = 'nodejs'
 
+function getSafeVoiceErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message
+      .replace(/SignalWire/gi, 'voice service')
+      .replace(/SIGNALWIRE_[A-Z0-9_]+/g, 'voice service setting')
+  }
+
+  if (typeof error === 'string' && error.trim()) {
+    return error
+      .replace(/SignalWire/gi, 'voice service')
+      .replace(/SIGNALWIRE_[A-Z0-9_]+/g, 'voice service setting')
+  }
+
+  return fallback
+}
+
 export const GET = withAuth(async (_req: NextRequest, { user }) => {
   try {
     const {
@@ -52,14 +68,14 @@ export const GET = withAuth(async (_req: NextRequest, { user }) => {
 
       if (response.status === 401) {
         return apiError(
-          'SignalWire authentication failed. Check SIGNALWIRE_PROJECT_ID, SIGNALWIRE_API_TOKEN, and SIGNALWIRE_SPACE_URL.',
+          'Voice provider authentication failed. Check your voice service configuration.',
           'VOICE_AUTH_FAILED',
           502,
           { status: response.status }
         )
       }
 
-      return Errors.externalApi('SignalWire', { status: response.status })
+      return Errors.externalApi('Voice service', { status: response.status })
     }
 
     const data = await response.json()
@@ -77,11 +93,11 @@ export const GET = withAuth(async (_req: NextRequest, { user }) => {
       if (!subscriberInfoResponse.ok) {
         const text = await subscriberInfoResponse.text()
         console.error(
-          'SignalWire subscriber info error:',
+          'Voice token subscriber info error:',
           subscriberInfoResponse.status,
           text
         )
-        return Errors.externalApi('SignalWire', {
+        return Errors.externalApi('Voice service', {
           status: subscriberInfoResponse.status,
         })
       }
@@ -109,7 +125,7 @@ export const GET = withAuth(async (_req: NextRequest, { user }) => {
 
       if (!sharedOutboundAddressId) {
         return apiError(
-          'SignalWire outbound audio address was not found for SIGNALWIRE_PHONE_NUMBER on the configured SIGNALWIRE_SUBSCRIBER_REFERENCE.',
+          'No outbound voice address is configured for the shared browser voice setup.',
           'VOICE_OUTBOUND_NOT_CONFIGURED',
           503
         )
@@ -142,7 +158,7 @@ export const GET = withAuth(async (_req: NextRequest, { user }) => {
     if (!outboundAddressId) {
       return apiError(
         assignment.voice_routing_error ||
-          'Your dedicated number is provisioned, but browser voice routing is not attached in SignalWire yet.',
+          'Your dedicated number is provisioned, but browser voice routing is not attached yet.',
         'VOICE_OUTBOUND_NOT_CONFIGURED',
         503
       )
@@ -154,13 +170,11 @@ export const GET = withAuth(async (_req: NextRequest, { user }) => {
       outboundAddressId,
       phoneNumber: assignment.phone_number,
       phoneNumberId: assignment.id,
-      })
+    })
   } catch (error) {
     console.error('Voice token error:', error)
     return apiError(
-      error instanceof Error && error.message.trim()
-        ? error.message
-        : 'Voice token setup failed.',
+      getSafeVoiceErrorMessage(error, 'Voice token setup failed.'),
       'VOICE_TOKEN_ERROR',
       500
     )

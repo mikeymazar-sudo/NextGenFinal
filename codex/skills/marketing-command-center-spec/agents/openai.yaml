@@ -1,0 +1,4 @@
+interface:
+  display_name: "Marketing Command Center Spec"
+  short_description: "Contract-first guidance for campaigns, inbox, audience, and analytics"
+  default_prompt: "Use $marketing-command-center-spec to keep marketing command center work aligned with the review-first, user-owned, manual-launch product contract."
