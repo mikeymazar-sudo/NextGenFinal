@@ -326,8 +326,9 @@ async function findPhoneRouteForNumber(phoneNumber: string) {
   const { apiToken, projectId, spaceHost } = getSignalWireAdminConfig()
   const normalizedPhone = normalizePhoneNumber(phoneNumber)
 
+  // Use the relay/rest phone_numbers endpoint — /api/fabric/phone_routes does not exist
   const response = await fetch(
-    `https://${spaceHost}/api/fabric/phone_routes?page_size=100`,
+    `https://${spaceHost}/api/relay/rest/phone_numbers?filter_number=${encodeURIComponent(normalizedPhone || phoneNumber)}&page_size=5`,
     {
       headers: {
         Authorization: getBasicAuthHeader(projectId, apiToken),
@@ -338,22 +339,19 @@ async function findPhoneRouteForNumber(phoneNumber: string) {
   if (!response.ok) {
     const text = await response.text()
     throw new Error(
-      `SignalWire phone routes lookup failed (${response.status}): ${text}`
+      `SignalWire phone number lookup failed (${response.status}): ${text}`
     )
   }
 
   const payload = (await response.json()) as {
-    data?: SignalWirePhoneRoute[]
+    data?: Array<{ id: string; number: string; name?: string | null }>
   }
 
-  const routes = payload.data || []
-  return routes.find((route) => {
-    const routeNumber =
-      normalizePhoneNumber(route.phone_number || '') ||
-      normalizePhoneNumber(route.number || '') ||
-      normalizePhoneNumber(route.name || '')
-    return routeNumber === normalizedPhone
-  }) || null
+  const numbers = payload.data || []
+  const match = numbers.find((n) => normalizePhoneNumber(n.number) === normalizedPhone)
+  if (!match) return null
+
+  return { id: match.id, number: match.number, name: match.name } as SignalWirePhoneRoute
 }
 
 async function assignPhoneRouteToSubscriber(
@@ -397,12 +395,14 @@ async function resolveOutboundAddressForReference(reference: string, phoneNumber
     phoneNumber
   )
 
-  // If no address exists, assign the phone route to this subscriber
+  // If no address exists, find the phone number in SignalWire and assign it to this subscriber
   if (!addressId) {
     console.log('[SignalWire] No address on subscriber, attempting phone route assignment for', phoneNumber)
     try {
       const phoneRoute = await findPhoneRouteForNumber(phoneNumber)
-      if (phoneRoute) {
+      if (!phoneRoute) {
+        console.error('[SignalWire] Phone number not found in SignalWire project:', phoneNumber)
+      } else {
         console.log('[SignalWire] Found phone route:', JSON.stringify(phoneRoute))
         const assigned = await assignPhoneRouteToSubscriber(
           subscriber.id,
@@ -410,8 +410,6 @@ async function resolveOutboundAddressForReference(reference: string, phoneNumber
         )
         console.log('[SignalWire] Assignment response:', JSON.stringify(assigned))
         addressId = assigned.id || null
-      } else {
-        console.error('[SignalWire] NO_ROUTE_FOUND for number:', phoneNumber)
       }
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error)

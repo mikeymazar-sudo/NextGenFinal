@@ -716,13 +716,13 @@ export function usePowerDialer({
                   property_id: failedLead.propertyId,
                   ended_at: new Date().toISOString(),
                 }).then()
-                sb.rpc('increment_unanswered', { prop_id: failedLead.propertyId }).then(({ error: rpcErr }) => {
+                sb.rpc('increment_unanswered', { prop_id: failedLead.propertyId }).then(({ error: rpcErr }: { error: unknown }) => {
                   if (rpcErr) {
                     sb.from('properties')
                       .select('unanswered_count, status')
                       .eq('id', failedLead.propertyId)
                       .single()
-                      .then(({ data: d }) => {
+                      .then(({ data: d }: { data: { unanswered_count?: number; status?: string } | null }) => {
                         const updates: Record<string, unknown> = {
                           unanswered_count: (d?.unanswered_count || 0) + 1,
                           last_called_at: new Date().toISOString(),
@@ -760,7 +760,7 @@ export function usePowerDialer({
             property_id: lead.propertyId,
             ended_at: new Date().toISOString(),
           }).then()
-          supabase.rpc('increment_unanswered', { prop_id: lead.propertyId }).then(({ error }) => {
+          supabase.rpc('increment_unanswered', { prop_id: lead.propertyId }).then(({ error }: { error: unknown }) => {
             if (error) {
               // Fallback: manual update
               supabase
@@ -768,7 +768,7 @@ export function usePowerDialer({
                 .select('unanswered_count, status')
                 .eq('id', lead.propertyId)
                 .single()
-                .then(({ data }) => {
+                .then(({ data }: { data: { unanswered_count?: number; status?: string } | null }) => {
                   const count = (data?.unanswered_count || 0) + 1
                   const updates: Record<string, unknown> = {
                     unanswered_count: count,

@@ -247,7 +247,7 @@ export function DialerSidebarWidget() {
                 const pid = propertyId
                 if (pid) {
                     const supabase = createClient()
-                    supabase.rpc('increment_unanswered', { prop_id: pid }).then(({ error }) => {
+                    supabase.rpc('increment_unanswered', { prop_id: pid }).then(({ error }: { error: unknown }) => {
                         if (error) {
                             // Fallback: do a manual update
                             supabase
@@ -255,7 +255,7 @@ export function DialerSidebarWidget() {
                                 .select('unanswered_count, status')
                                 .eq('id', pid)
                                 .single()
-                                .then(({ data }) => {
+                                .then(({ data }: { data: { unanswered_count?: number; status?: string } | null }) => {
                                     const count = (data?.unanswered_count || 0) + 1
                                     const updates: Record<string, unknown> = {
                                         unanswered_count: count,
