@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { hasSupabaseBrowserEnv } from '@/lib/supabase/config'
 import { Building2, Loader2 } from 'lucide-react'
 
 function getAuthCookiePrefixes() {
@@ -51,6 +52,7 @@ async function waitForAuthCookie(timeoutMs = 1500) {
 }
 
 export default function LoginPage() {
+  const authConfigured = hasSupabaseBrowserEnv()
   const [isSignUp, setIsSignUp] = useState(false)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -132,6 +134,35 @@ export default function LoginPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  if (!authConfigured) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-zinc-50 to-zinc-100 dark:from-zinc-950 dark:to-zinc-900 px-4">
+        <Card className="w-full max-w-md shadow-lg">
+          <CardHeader className="text-center space-y-2">
+            <div className="flex items-center justify-center gap-2 mb-2">
+              <div className="h-10 w-10 rounded-lg bg-blue-600 flex items-center justify-center">
+                <Building2 className="h-6 w-6 text-white" />
+              </div>
+              <span className="text-2xl font-bold tracking-tight">NextGen Realty</span>
+            </div>
+            <CardTitle className="text-xl">Authentication needs setup</CardTitle>
+            <CardDescription>
+              Add your Supabase public environment variables to enable sign-in on this deployment.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm text-muted-foreground">
+            <p>Missing environment variables:</p>
+            <p className="font-mono text-xs rounded-md bg-zinc-100 dark:bg-zinc-900 px-3 py-2">
+              NEXT_PUBLIC_SUPABASE_URL
+              <br />
+              NEXT_PUBLIC_SUPABASE_ANON_KEY
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    )
   }
 
   return (

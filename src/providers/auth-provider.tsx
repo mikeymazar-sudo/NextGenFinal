@@ -1,7 +1,8 @@
 'use client'
 
 import { createContext, useContext, useEffect, useState, useRef, useCallback } from 'react'
-import { createClient } from '@/lib/supabase/client'
+import { createClient, maybeCreateClient } from '@/lib/supabase/client'
+import { hasSupabaseBrowserEnv } from '@/lib/supabase/config'
 import type { User, Session, AuthChangeEvent } from '@supabase/supabase-js'
 import type { UserProfile } from '@/types/schema'
 
@@ -24,19 +25,39 @@ interface AuthProviderProps {
 }
 
 export function AuthProvider({ children, initialUser = null }: AuthProviderProps) {
+  const authEnabled = hasSupabaseBrowserEnv()
   const [user, setUser] = useState<User | null>(initialUser)
   const [profile, setProfile] = useState<UserProfile | null>(null)
   const [session, setSession] = useState<Session | null>(null)
   // Start true so the protected layout waits for auth to resolve before
   // deciding to redirect. Start false only if SSR already hydrated a user.
-  const [loading, setLoading] = useState(!initialUser)
-  const supabaseRef = useRef(createClient())
+  const [loading, setLoading] = useState(authEnabled && !initialUser)
+  const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null)
   const fetchedProfileUserIdRef = useRef<string | null>(null)
   const inFlightProfileUserIdRef = useRef<string | null>(null)
   const inFlightProfileRequestRef = useRef<Promise<void> | null>(null)
 
+  const getSupabase = useCallback(() => {
+    if (supabaseRef.current) {
+      return supabaseRef.current
+    }
+
+    const client = maybeCreateClient()
+
+    if (!client) {
+      return null
+    }
+
+    supabaseRef.current = client
+    return client
+  }, [])
+
   const fetchProfile = useCallback(async (userId: string, { force = false }: { force?: boolean } = {}) => {
-    const supabase = supabaseRef.current
+    const supabase = getSupabase()
+
+    if (!supabase) {
+      return
+    }
 
     if (!force) {
       if (fetchedProfileUserIdRef.current === userId) return
@@ -75,15 +96,23 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
     inFlightProfileUserIdRef.current = userId
     inFlightProfileRequestRef.current = profileRequest
     await profileRequest
-  }, [])
+  }, [getSupabase])
 
   const refreshProfile = useCallback(async () => {
     if (user) await fetchProfile(user.id, { force: true })
   }, [user, fetchProfile])
 
   useEffect(() => {
-    const supabase = supabaseRef.current
     let mounted = true
+
+    const supabase = getSupabase()
+
+    if (!supabase) {
+      setLoading(false)
+      return () => {
+        mounted = false
+      }
+    }
 
     const initAuth = async () => {
       try {
@@ -135,10 +164,16 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
       mounted = false
       subscription.unsubscribe()
     }
-  }, [fetchProfile])
+  }, [getSupabase, fetchProfile])
 
   const signIn = async (email: string, password: string) => {
-    const { data, error } = await supabaseRef.current.auth.signInWithPassword({ email, password })
+    const supabase = getSupabase()
+
+    if (!supabase) {
+      return { error: 'Authentication is not configured for this deployment.' }
+    }
+
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password })
 
     if (!error) {
       setSession(data.session ?? null)
@@ -150,7 +185,13 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
   }
 
   const signUp = async (email: string, password: string, fullName?: string) => {
-    const { error } = await supabaseRef.current.auth.signUp({
+    const supabase = getSupabase()
+
+    if (!supabase) {
+      return { error: 'Authentication is not configured for this deployment.' }
+    }
+
+    const { error } = await supabase.auth.signUp({
       email,
       password,
       options: { data: { full_name: fullName } },
@@ -159,7 +200,12 @@ export function AuthProvider({ children, initialUser = null }: AuthProviderProps
   }
 
   const handleSignOut = async () => {
-    await supabaseRef.current.auth.signOut()
+    const supabase = getSupabase()
+
+    if (supabase) {
+      await supabase.auth.signOut()
+    }
+
     fetchedProfileUserIdRef.current = null
     inFlightProfileUserIdRef.current = null
     inFlightProfileRequestRef.current = null

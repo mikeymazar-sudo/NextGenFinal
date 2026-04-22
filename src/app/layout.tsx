@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import { AuthProvider } from "@/providers/auth-provider";
 import { ThemeProvider } from "@/providers/theme-provider";
 import { Toaster } from "@/components/ui/sonner";
+import { hasSupabaseBrowserEnv } from "@/lib/supabase/config";
 import { createServerClient } from "@/lib/supabase/server";
 import "./globals.css";
 
@@ -22,7 +23,7 @@ export const metadata: Metadata = {
 };
 
 async function getInitialUser() {
-  if (!process.env.NEXT_PUBLIC_SUPABASE_URL || !process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY) {
+  if (!hasSupabaseBrowserEnv()) {
     return null;
   }
 

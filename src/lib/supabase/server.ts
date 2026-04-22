@@ -1,20 +1,37 @@
 import { createClient } from '@supabase/supabase-js'
 import { createServerClient as createSSRClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
+import { getSupabaseAdminEnv, getSupabaseBrowserEnv } from '@/lib/supabase/config'
 
 export function createAdminClient() {
+  const supabaseEnv = getSupabaseAdminEnv()
+
+  if (!supabaseEnv) {
+    throw new Error(
+      'Supabase admin access is not configured. Set NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.'
+    )
+  }
+
   return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
+    supabaseEnv.url,
+    supabaseEnv.serviceRoleKey
   )
 }
 
 export async function createServerClient() {
+  const supabaseEnv = getSupabaseBrowserEnv()
+
+  if (!supabaseEnv) {
+    throw new Error(
+      'Supabase auth is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.'
+    )
+  }
+
   const cookieStore = await cookies()
 
   return createSSRClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    supabaseEnv.url,
+    supabaseEnv.anonKey,
     {
       cookies: {
         getAll() {

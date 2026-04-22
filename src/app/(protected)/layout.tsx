@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 import { createServerClient } from '@/lib/supabase/server'
+import { hasSupabaseBrowserEnv } from '@/lib/supabase/config'
 import { Sidebar } from '@/components/layout/sidebar'
 import { Header } from '@/components/layout/header'
 
@@ -8,6 +9,10 @@ export default async function ProtectedLayout({
 }: {
   children: React.ReactNode
 }) {
+  if (!hasSupabaseBrowserEnv()) {
+    redirect('/login')
+  }
+
   const supabase = await createServerClient()
   const {
     data: { user },
