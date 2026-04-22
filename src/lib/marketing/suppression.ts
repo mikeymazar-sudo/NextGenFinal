@@ -1,4 +1,5 @@
 import { createAdminClient } from '@/lib/supabase/server'
+import type { GlobalSuppressionStatus } from '@/types/schema'
 
 export type MarketingChannel = 'sms' | 'email' | 'voice'
 
@@ -11,7 +12,7 @@ export type GlobalSuppressionRow = {
   destination: string
   reason: string | null
   source: string | null
-  status: string | null
+  status: GlobalSuppressionStatus | null
   suppressed_at: string | null
   resolved_at: string | null
 }
@@ -22,6 +23,7 @@ export type SuppressionTarget = {
   ownerUserId?: string | null
   propertyId?: string | null
   contactId?: string | null
+  supabase?: ReturnType<typeof createAdminClient>
 }
 
 export type SuppressionCheck = {
@@ -34,10 +36,15 @@ function normalizeDestination(destination: string) {
   return destination.trim()
 }
 
+export function normalizeSuppressionStatus(status: string | null | undefined): GlobalSuppressionStatus {
+  return status === 'resolved' ? 'resolved' : 'active'
+}
+
 export async function checkMarketingSuppression(
   target: SuppressionTarget,
   supabase = createAdminClient()
 ): Promise<SuppressionCheck> {
+  const client = target.supabase ?? supabase
   const destination = normalizeDestination(target.destination)
 
   if (!destination) {
@@ -49,7 +56,7 @@ export async function checkMarketingSuppression(
   }
 
   try {
-    let query = supabase
+    let query = client
       .from('global_suppressions')
       .select(
         'id, owner_user_id, property_id, contact_id, channel, destination, reason, source, status, suppressed_at, resolved_at'
@@ -94,7 +101,10 @@ export async function checkMarketingSuppression(
     return {
       allowed: false,
       reason: 'suppressed',
-      matchedSuppression: data as GlobalSuppressionRow,
+      matchedSuppression: {
+        ...(data as GlobalSuppressionRow),
+        status: normalizeSuppressionStatus((data as GlobalSuppressionRow | null)?.status || null),
+      },
     }
   } catch (error) {
     console.error('Suppression lookup error:', error)
@@ -105,4 +115,3 @@ export async function checkMarketingSuppression(
     }
   }
 }
-

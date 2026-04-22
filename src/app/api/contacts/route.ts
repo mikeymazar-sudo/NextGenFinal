@@ -4,6 +4,12 @@ import { withAuth } from '@/lib/auth/middleware'
 import { apiSuccess, Errors } from '@/lib/api/response'
 import { createAdminClient } from '@/lib/supabase/server'
 import { resolveMarketingActor } from '@/lib/marketing/actor'
+import {
+    consentMetadataFromFields,
+    createDestinationEntry,
+    normalizeContactRecord,
+    normalizeDestinationEntries,
+} from '@/lib/marketing/destination-consent'
 import { requirePropertyOwnership } from '@/lib/marketing/ownership'
 
 const AddContactSchema = z.object({
@@ -11,6 +17,10 @@ const AddContactSchema = z.object({
     type: z.enum(['phone', 'email']),
     value: z.string().min(1),
     label: z.string().optional(),
+    consent_status: z.string().optional(),
+    consent_source: z.string().optional(),
+    consent_updated_at: z.string().nullable().optional(),
+    consent_note: z.string().nullable().optional(),
 })
 
 export const GET = withAuth(async (req: NextRequest, { user }) => {
@@ -43,7 +53,7 @@ export const GET = withAuth(async (req: NextRequest, { user }) => {
             return Errors.internal(contactsError.message)
         }
 
-        return apiSuccess(contacts || [])
+        return apiSuccess((contacts || []).map((contact) => normalizeContactRecord(contact)))
     } catch (error) {
         console.error('Get contacts error:', error)
         return Errors.internal()
@@ -59,9 +69,20 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
             return Errors.badRequest('Missing required fields: propertyId, type, value')
         }
 
-        const { propertyId, type, value, label } = parsed.data
+        const { propertyId, type, value, label, consent_status, consent_source, consent_updated_at, consent_note } = parsed.data
         const supabase = createAdminClient()
         const actor = await resolveMarketingActor(user.id, { supabase, email: user.email })
+        const now = new Date().toISOString()
+        const consent = consentMetadataFromFields(
+            {
+                consent_status,
+                consent_source,
+                consent_updated_at,
+                consent_note,
+            },
+            'manual',
+            now
+        )
 
         const propertyAccess = await requirePropertyOwnership(user.id, propertyId, {
             supabase,
@@ -84,12 +105,26 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
             const updateData: Record<string, unknown> = {}
 
             if (type === 'phone') {
-                const currentPhones = existingContact.phone_numbers || []
-                const newEntry = { value, label: label || 'mobile', is_primary: currentPhones.length === 0 }
+                const currentPhones = normalizeDestinationEntries(existingContact.phone_numbers || [], 'sms')
+                const newEntry = createDestinationEntry({
+                    channel: 'sms',
+                    value,
+                    label: label || 'mobile',
+                    isPrimary: currentPhones.length === 0,
+                    consent,
+                    defaultConsentSource: 'manual',
+                })
                 updateData.phone_numbers = [...currentPhones, newEntry]
             } else {
-                const currentEmails = existingContact.emails || []
-                const newEntry = { value, label: label || 'personal', is_primary: currentEmails.length === 0 }
+                const currentEmails = normalizeDestinationEntries(existingContact.emails || [], 'email')
+                const newEntry = createDestinationEntry({
+                    channel: 'email',
+                    value,
+                    label: label || 'personal',
+                    isPrimary: currentEmails.length === 0,
+                    consent,
+                    defaultConsentSource: 'manual',
+                })
                 updateData.emails = [...currentEmails, newEntry]
             }
 
@@ -105,14 +140,38 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
                 return Errors.internal(updateError.message)
             }
 
-            return apiSuccess(updated)
+            return apiSuccess(normalizeContactRecord(updated))
         } else {
             // Create new contact
             const newContact: Record<string, unknown> = {
                 property_id: propertyId,
                 name: null,
-                phone_numbers: type === 'phone' ? [{ value, label: label || 'mobile', is_primary: true }] : [],
-                emails: type === 'email' ? [{ value, label: label || 'personal', is_primary: true }] : [],
+                phone_numbers:
+                    type === 'phone'
+                        ? [
+                              createDestinationEntry({
+                                  channel: 'sms',
+                                  value,
+                                  label: label || 'mobile',
+                                  isPrimary: true,
+                                  consent,
+                                  defaultConsentSource: 'manual',
+                              }),
+                          ]
+                        : [],
+                emails:
+                    type === 'email'
+                        ? [
+                              createDestinationEntry({
+                                  channel: 'email',
+                                  value,
+                                  label: label || 'personal',
+                                  isPrimary: true,
+                                  consent,
+                                  defaultConsentSource: 'manual',
+                              }),
+                          ]
+                        : [],
             }
 
             const { data: created, error: createError } = await supabase
@@ -126,7 +185,7 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
                 return Errors.internal(createError.message)
             }
 
-            return apiSuccess(created)
+            return apiSuccess(normalizeContactRecord(created))
         }
     } catch (error) {
         console.error('Add contact error:', error)

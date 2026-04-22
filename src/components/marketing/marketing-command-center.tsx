@@ -14,7 +14,6 @@ import {
   FileDown,
   Inbox,
   Mail,
-  Megaphone,
   MicVocal,
   MessageSquareMore,
   Phone,
@@ -45,21 +44,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Input } from '@/components/ui/input'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
-import { Textarea } from '@/components/ui/textarea'
 import { api } from '@/lib/api/client'
+import {
+  MarketingWorkflowBuilder,
+  type WorkflowCampaignRecord,
+} from '@/components/marketing/marketing-workflow-builder'
 
-type MarketingChannel = 'sms' | 'email' | 'voice'
+type MarketingChannel = 'sms' | 'email' | 'voice' | 'multi'
 type ReviewState = 'draft' | 'review_required' | 'approved'
 type LaunchState = 'draft' | 'active' | 'partially_failed' | 'failed' | 'archived'
 type ImportState = 'import_pending' | 'processing' | 'completed' | 'partial_failure' | 'failed'
@@ -106,6 +100,8 @@ type Campaign = {
     subject: string
     message: string
     voicemailAssetLabel: string
+    templatePresetId: string
+    templateLabel: string
   }
   steps: CampaignStep[]
 }
@@ -166,15 +162,6 @@ type MarketingBootstrap = {
   lastSyncedAt: string
 }
 
-type CampaignDraftForm = {
-  name: string
-  channel: MarketingChannel
-  audienceSourceLabel: string
-  subject: string
-  message: string
-  voicemailAssetLabel: string
-}
-
 const channelMeta: Record<
   MarketingChannel,
   { label: string; icon: typeof MessageSquareMore; helper: string }
@@ -194,7 +181,40 @@ const channelMeta: Record<
     icon: MicVocal,
     helper: 'Leave a recorded message without live calling.',
   },
+  multi: {
+    label: 'Workflow',
+    icon: Wand2,
+    helper: 'Multi-channel workflow with shared launch ordering.',
+  },
 }
+
+const importFieldMapping = [
+  {
+    source: 'Street address and city',
+    target: 'Property match',
+    detail: 'Used to decide which lead record the row belongs to and to reduce duplicate intake.',
+  },
+  {
+    source: 'Owner name',
+    target: 'Contact label',
+    detail: 'Shown in the audience list, inbox, and review queue so the user sees a human-friendly name.',
+  },
+  {
+    source: 'Phone number',
+    target: 'SMS and voicemail destination',
+    detail: 'Needed for text or voicemail campaigns. Missing or invalid phone data makes the row ineligible for phone channels.',
+  },
+  {
+    source: 'Email address',
+    target: 'Email destination',
+    detail: 'If present and valid, the row can be used in cold email campaigns.',
+  },
+  {
+    source: 'Suppression and ownership checks',
+    target: 'Eligibility status',
+    detail: 'Opt-outs, blocked destinations, and ownership mismatches override the raw import before launch.',
+  },
+] as const
 
 const reviewStateMeta: Record<
   ReviewState,
@@ -338,10 +358,12 @@ function createDemoBootstrap(): MarketingBootstrap {
           '4 rows are missing a valid destination.',
         ],
         draft: {
-          subject: 'Quick check-in',
+          subject: 'Quick question about 1223 Palm St',
           message:
-            'Hi there, I wanted to share a short update on active opportunities and see whether a quick market check would be helpful this week.',
+            'Hi Ava, this is Michael. I am reaching out to see whether you would ever consider an offer on 1223 Palm St. No pressure at all, I just wanted to ask.',
           voicemailAssetLabel: 'None',
+          templatePresetId: 'sms-owner-intro',
+          templateLabel: 'Owner intro text',
         },
         steps: [
           {
@@ -391,6 +413,8 @@ function createDemoBootstrap(): MarketingBootstrap {
           message:
             'Hi, this is a quick recorded update about a new listing opportunity. I left a voicemail with the key details.',
           voicemailAssetLabel: 'Neighborhood update v2',
+          templatePresetId: '',
+          templateLabel: 'Neighborhood update',
         },
         steps: [
           {
@@ -434,10 +458,12 @@ function createDemoBootstrap(): MarketingBootstrap {
         nextAction: 'Watch replies and follow up on the hottest prospects.',
         reviewReasons: ['Sender identity and reply-to are verified.'],
         draft: {
-          subject: 'Thanks for stopping by',
+          subject: 'Would you consider an as-is offer on 11 Maple Ct?',
           message:
-            'Thanks for visiting the open house. I put together a short recap of the property and the next steps if you want to take another look.',
+            'Hi Courtney,\n\nI wanted to reach out and ask whether you would ever consider an as-is offer on 11 Maple Ct. I work with owners who want a straightforward sale without repairs, listings, or drawn-out timelines.\n\nIf you are open to it, I can send over a simple range and next steps.\n\nBest,\nMichael',
           voicemailAssetLabel: 'None',
+          templatePresetId: 'email-as-is-offer',
+          templateLabel: 'As-is offer email',
         },
         steps: [
           {
@@ -470,10 +496,12 @@ function createDemoBootstrap(): MarketingBootstrap {
         nextAction: 'Write copy, then run the eligibility review.',
         reviewReasons: ['Draft not yet reviewed.'],
         draft: {
-          subject: 'New pricing update',
+          subject: 'Following up on 18 Cypress Ln',
           message:
-            'I wanted to send a quick update that the pricing changed and there is a strong new opening for interested buyers.',
+            'Hi Bri, following up in case my earlier note got buried. If selling 18 Cypress Ln is not on your radar, no worries. If it is, I would be happy to share what a simple cash offer could look like.',
           voicemailAssetLabel: 'None',
+          templatePresetId: 'sms-gentle-follow-up',
+          templateLabel: 'Gentle follow-up',
         },
         steps: [
           {
@@ -702,17 +730,6 @@ function createDemoBootstrap(): MarketingBootstrap {
   }
 }
 
-function createDraftFromCampaign(campaign: Campaign): CampaignDraftForm {
-  return {
-    name: campaign.name,
-    channel: campaign.channel,
-    audienceSourceLabel: campaign.audienceSourceLabel,
-    subject: campaign.draft.subject,
-    message: campaign.draft.message,
-    voicemailAssetLabel: campaign.draft.voicemailAssetLabel,
-  }
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null
 }
@@ -773,82 +790,6 @@ function formatNumber(value: number) {
 
 function formatTime(value: string) {
   return formatDistanceToNow(new Date(value), { addSuffix: true })
-}
-
-function getCampaignIssueSummary(campaign: Campaign) {
-  const issues: { label: string; detail: string }[] = []
-
-  if (campaign.reviewState === 'draft') {
-    issues.push({
-      label: 'Draft',
-      detail: 'The campaign has not been reviewed yet.',
-    })
-  }
-
-  if (campaign.suppressedCount > 0) {
-    issues.push({
-      label: 'Suppressed destinations',
-      detail: `${formatNumber(campaign.suppressedCount)} recipients are blocked by global suppression.`,
-    })
-  }
-
-  if (campaign.ineligibleCount > 0) {
-    issues.push({
-      label: 'Ineligible rows',
-      detail: `${formatNumber(campaign.ineligibleCount)} rows are missing a valid destination or ownership match.`,
-    })
-  }
-
-  if (campaign.channel === 'voice' && campaign.draft.voicemailAssetLabel === 'None') {
-    issues.push({
-      label: 'Missing voicemail asset',
-      detail: 'Voicemail campaigns need a stored recording before launch.',
-    })
-  }
-
-  return issues
-}
-
-function getReviewChecklist(campaign: Campaign) {
-  const hasVoicemail = campaign.channel !== 'voice' || campaign.draft.voicemailAssetLabel !== 'None'
-  return [
-    {
-      label: 'Ownership',
-      ok: true,
-      detail: 'Campaign and audience belong to the current owner.',
-    },
-    {
-      label: 'Destination',
-      ok: campaign.audienceCount > 0,
-      detail: `${formatNumber(campaign.audienceCount)} target rows are in scope.`,
-    },
-    {
-      label: 'Suppression',
-      ok: campaign.suppressedCount === 0,
-      detail:
-        campaign.suppressedCount === 0
-          ? 'No suppressed destinations found.'
-          : `${formatNumber(campaign.suppressedCount)} suppressed recipients need handling.`,
-    },
-    {
-      label: 'Eligibility',
-      ok: campaign.ineligibleCount === 0,
-      detail:
-        campaign.ineligibleCount === 0
-          ? 'All rows are eligible.'
-          : `${formatNumber(campaign.ineligibleCount)} rows need cleanup before launch.`,
-    },
-    {
-      label: 'Voicemail asset',
-      ok: hasVoicemail,
-      detail:
-        campaign.channel === 'voice'
-          ? campaign.draft.voicemailAssetLabel === 'None'
-            ? 'Add a playable voicemail asset.'
-            : `Using ${campaign.draft.voicemailAssetLabel}.`
-          : 'Not required for this channel.',
-    },
-  ]
 }
 
 function getChannelBadge(channel: MarketingChannel) {
@@ -1001,10 +942,10 @@ export function MarketingCommandCenter() {
   const [bootstrap, setBootstrap] = useState<MarketingBootstrap>(createDemoBootstrap)
   const [activeTab, setActiveTab] = useState('builder')
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null)
+  const [selectedImportId, setSelectedImportId] = useState<string | null>(null)
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null)
   const [dialogMode, setDialogMode] = useState<'launch' | 'suppress' | null>(null)
-  const [draft, setDraft] = useState<CampaignDraftForm>(createDraftFromCampaign(createDemoBootstrap().campaigns[0]))
-  const [pendingAction, setPendingAction] = useState<'refresh' | 'save' | 'review' | 'launch' | 'suppress' | null>(null)
+  const [pendingAction, setPendingAction] = useState<'refresh' | 'review' | 'launch' | 'suppress' | null>(null)
 
   const loadBootstrap = useCallback(async () => {
     setLoading(true)
@@ -1022,6 +963,75 @@ export function MarketingCommandCenter() {
     }
   }, [])
 
+  const hydrateCampaignWorkflow = useCallback(async (campaignId: string) => {
+    const response = await api.getMarketingWorkflow(campaignId)
+    if (response.error || !response.data) {
+      return
+    }
+
+    const deriveWorkflowChannel = (nodes: Array<{ kind?: string }> = []) => {
+      const deliveryKinds = Array.from(
+        new Set(
+          nodes
+            .map((node) => node.kind)
+            .filter((kind): kind is string => kind === 'sms' || kind === 'email' || kind === 'voicemail')
+        )
+      )
+
+      if (deliveryKinds.length > 1) return 'multi'
+      if (deliveryKinds[0] === 'email') return 'email'
+      if (deliveryKinds[0] === 'voicemail') return 'voice'
+      return 'sms'
+    }
+
+    setBootstrap((current) => ({
+      ...current,
+      campaigns: current.campaigns.map((campaign) =>
+        campaign.id === campaignId
+          ? {
+              ...campaign,
+              channel: deriveWorkflowChannel(response.data?.draft?.nodes || []),
+              workflow: response.data?.draft,
+              workflowVersion: response.data?.latestVersion,
+              consentSummary: response.data?.consentSummary,
+              convertedLegacyFlow: response.data?.draft?.convertedFromLegacy || false,
+              readOnlyWorkflow: response.data?.draft?.readOnly || false,
+            }
+          : campaign
+      ),
+    }))
+  }, [])
+
+  const persistWorkflow = useCallback(async (payload: {
+    campaignId: string
+    nodes: Array<{
+      id: string
+      kind: 'sms' | 'email' | 'voicemail' | 'wait' | 'condition' | 'exit'
+      laneKey: 'logic' | 'sms' | 'email' | 'voicemail'
+      sequence: number
+      label: string
+      position: { x: number; y: number }
+      config: Record<string, unknown>
+    }>
+    edges: Array<{
+      id: string
+      sourceNodeId: string
+      targetNodeId: string
+      branchKey: 'default' | 'true' | 'false'
+    }>
+  }) => {
+    const response = await api.updateMarketingWorkflow(payload.campaignId, {
+      nodes: payload.nodes,
+      edges: payload.edges,
+    })
+
+    if (response.error) {
+      throw new Error(response.error)
+    }
+
+    await hydrateCampaignWorkflow(payload.campaignId)
+  }, [hydrateCampaignWorkflow])
+
   useEffect(() => {
     void loadBootstrap()
   }, [loadBootstrap])
@@ -1034,6 +1044,17 @@ export function MarketingCommandCenter() {
       )
     }
   }, [bootstrap.campaigns, selectedCampaignId])
+
+  useEffect(() => {
+    if (!selectedCampaignId) return
+    void hydrateCampaignWorkflow(selectedCampaignId)
+  }, [hydrateCampaignWorkflow, selectedCampaignId])
+
+  useEffect(() => {
+    if (!selectedImportId && bootstrap.imports.length > 0) {
+      setSelectedImportId(bootstrap.imports[0].id)
+    }
+  }, [bootstrap.imports, selectedImportId])
 
   useEffect(() => {
     if (!selectedThreadId && bootstrap.threads.length > 0) {
@@ -1049,14 +1070,10 @@ export function MarketingCommandCenter() {
 
   const selectedCampaign =
     campaigns.find((campaign) => campaign.id === selectedCampaignId) ?? campaigns[0] ?? null
+  const selectedImport =
+    imports.find((batch) => batch.id === selectedImportId) ?? imports[0] ?? null
   const selectedThread =
     threads.find((thread) => thread.id === selectedThreadId) ?? threads[0] ?? null
-
-  useEffect(() => {
-    if (selectedCampaign) {
-      setDraft(createDraftFromCampaign(selectedCampaign))
-    }
-  }, [selectedCampaign])
 
   const analytics = useMemo(
     () => normalizeAnalytics(bootstrap.analytics, campaigns, threads),
@@ -1080,15 +1097,6 @@ export function MarketingCommandCenter() {
     selectedCampaign?.launchState === 'partially_failed' ||
     selectedCampaign?.launchState === 'failed'
 
-  const isDraftDirty =
-    Boolean(selectedCampaign) &&
-    (draft.name !== selectedCampaign?.name ||
-      draft.channel !== selectedCampaign?.channel ||
-      draft.audienceSourceLabel !== selectedCampaign?.audienceSourceLabel ||
-      draft.subject !== selectedCampaign?.draft.subject ||
-      draft.message !== selectedCampaign?.draft.message ||
-      draft.voicemailAssetLabel !== selectedCampaign?.draft.voicemailAssetLabel)
-
   const canLaunch =
     Boolean(selectedCampaign) &&
     selectedCampaign.reviewState === 'approved' &&
@@ -1098,32 +1106,6 @@ export function MarketingCommandCenter() {
     setPendingAction('refresh')
     void loadBootstrap().finally(() => setPendingAction(null))
   }, [loadBootstrap])
-
-  const saveDraft = async () => {
-    if (!selectedCampaign || isCampaignReadOnly) return
-
-    setPendingAction('save')
-
-    const response = await api.updateMarketingCampaign(selectedCampaign.id, {
-      name: draft.name,
-      reviewState: 'draft',
-      draftPayload: {
-        subject: draft.subject,
-        message: draft.message,
-        voicemailAssetLabel: draft.voicemailAssetLabel,
-      },
-    })
-
-    if (response.error) {
-      toast.error(response.error)
-      setPendingAction(null)
-      return
-    }
-
-    toast.success('Draft saved')
-    await loadBootstrap()
-    setPendingAction(null)
-  }
 
   const runReview = async () => {
     if (!selectedCampaign || isCampaignReadOnly) return
@@ -1296,8 +1278,8 @@ export function MarketingCommandCenter() {
         <TabsContent value="builder" className="space-y-6">
           <SectionHeader
             eyebrow="Builder"
-            title="Configure, preview, review"
-            description="Build a campaign in sequence, then clear eligibility issues before launch. Launch-capable actions stay disabled until the review state is ready."
+            title="Workflow canvas"
+            description="Build a fixed-lane workflow, keep the global execution order visible, and inspect the launch preview before review or launch."
             actions={
               <>
                 <Button
@@ -1316,317 +1298,12 @@ export function MarketingCommandCenter() {
             }
           />
 
-          {campaigns.length === 0 ? (
-            <EmptyState
-              icon={Megaphone}
-              title="No campaigns yet"
-              description="Create a draft campaign first, then review its audience and launch path."
-              actionLabel="Create a campaign"
-              onAction={() => setActiveTab('builder')}
-            />
-          ) : (
-            <div className="grid gap-6 lg:grid-cols-[1.15fr_0.85fr]">
-              <Card className="shadow-sm">
-                <CardHeader>
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <CardTitle>Campaign studio</CardTitle>
-                      <CardDescription>
-                        Edit the active draft, then save and review it before launch.
-                      </CardDescription>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {getChannelBadge(selectedCampaign?.channel ?? 'sms')}
-                      {selectedCampaign ? getStateBadge(selectedCampaign.reviewState) : null}
-                      {selectedCampaign ? getStateBadge(selectedCampaign.launchState) : null}
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-5">
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <p className="text-sm font-medium">Campaign</p>
-                      <Select
-                        value={selectedCampaign?.id ?? ''}
-                        onValueChange={(value) => setSelectedCampaignId(value)}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Choose a campaign" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {campaigns.map((campaign) => (
-                            <SelectItem key={campaign.id} value={campaign.id}>
-                              {campaign.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <p className="text-sm font-medium">Channel</p>
-                      <Select
-                        value={draft.channel}
-                        onValueChange={(value) => setDraft((current) => ({ ...current, channel: value as MarketingChannel }))}
-                        disabled={isCampaignReadOnly}
-                      >
-                        <SelectTrigger className="w-full">
-                          <SelectValue placeholder="Choose a channel" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {(Object.keys(channelMeta) as MarketingChannel[]).map((channel) => (
-                            <SelectItem key={channel} value={channel}>
-                              {channelMeta[channel].label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <p className="text-sm font-medium">Campaign name</p>
-                    <Input
-                      value={draft.name}
-                      onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
-                      disabled={isCampaignReadOnly}
-                      placeholder="Campaign name"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <p className="text-sm font-medium">Audience source</p>
-                    <Input
-                      value={draft.audienceSourceLabel}
-                      onChange={(event) =>
-                        setDraft((current) => ({ ...current, audienceSourceLabel: event.target.value }))
-                      }
-                      disabled={isCampaignReadOnly}
-                      placeholder="Audience source"
-                    />
-                  </div>
-
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <p className="text-sm font-medium">Subject line</p>
-                      <Input
-                        value={draft.subject}
-                        onChange={(event) => setDraft((current) => ({ ...current, subject: event.target.value }))}
-                        disabled={isCampaignReadOnly || draft.channel === 'voice'}
-                        placeholder="Subject or preview text"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <p className="text-sm font-medium">Voicemail asset</p>
-                      <Input
-                        value={draft.voicemailAssetLabel}
-                        onChange={(event) =>
-                          setDraft((current) => ({ ...current, voicemailAssetLabel: event.target.value }))
-                        }
-                        disabled={isCampaignReadOnly || draft.channel !== 'voice'}
-                        placeholder="Voicemail asset"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <p className="text-sm font-medium">Message preview</p>
-                    <Textarea
-                      value={draft.message}
-                      onChange={(event) => setDraft((current) => ({ ...current, message: event.target.value }))}
-                      disabled={isCampaignReadOnly}
-                      className="min-h-28"
-                      placeholder="Write the campaign message"
-                    />
-                  </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        void saveDraft()
-                      }}
-                      disabled={!selectedCampaign || isCampaignReadOnly || !isDraftDirty || pendingAction !== null}
-                    >
-                      Save draft
-                    </Button>
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        void runReview()
-                      }}
-                      disabled={!selectedCampaign || isCampaignReadOnly || pendingAction !== null}
-                    >
-                      Review eligibility
-                    </Button>
-                    <Button onClick={openLaunchDialog} disabled={!canLaunch || pendingAction !== null}>
-                      Launch campaign
-                    </Button>
-                  </div>
-
-                  <p className="text-xs text-muted-foreground">
-                    {isCampaignReadOnly
-                      ? 'This campaign is already launched, so the draft fields are read-only.'
-                      : canLaunch
-                        ? 'The draft is approved and ready to launch.'
-                        : 'Review required before launch. Resolve the highlighted items first.'}
-                  </p>
-
-                  <div className="rounded-2xl border bg-muted/20 p-4">
-                    <div className="flex items-center justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-medium">Step preview</p>
-                        <p className="text-xs text-muted-foreground">
-                          Ordered campaign actions are rendered exactly as the launch flow will use them.
-                        </p>
-                      </div>
-                      <Badge variant="outline">{selectedCampaign ? `${selectedCampaign.steps.length} steps` : '0 steps'}</Badge>
-                    </div>
-
-                    <div className="mt-4 space-y-3">
-                      {selectedCampaign?.steps.map((step) => (
-                        <div key={step.id} className="rounded-xl border bg-background p-3">
-                          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-                            <div>
-                              <div className="flex items-center gap-2">
-                                <Badge variant="outline">Step {step.order}</Badge>
-                                {getChannelBadge(step.channel)}
-                              </div>
-                              <p className="mt-2 text-sm font-medium">{step.templateLabel}</p>
-                              <p className="mt-1 text-sm text-muted-foreground">{step.preview}</p>
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                              {getStateBadge(step.reviewState)}
-                              {getStateBadge(step.executionStatus)}
-                            </div>
-                          </div>
-                          {step.voicemailAssetLabel ? (
-                            <p className="mt-2 text-xs text-muted-foreground">
-                              Voicemail asset: {step.voicemailAssetLabel}
-                            </p>
-                          ) : null}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              <Card className="shadow-sm">
-                <CardHeader>
-                  <CardTitle>Review queue</CardTitle>
-                  <CardDescription>
-                    Surface suppression, ownership, and eligibility issues before launch.
-                  </CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {selectedCampaign ? (
-                    <>
-                      <div
-                        className={cn(
-                          'rounded-2xl border p-4',
-                          selectedCampaign.reviewState === 'approved'
-                            ? 'border-emerald-200 bg-emerald-50/60 dark:border-emerald-900 dark:bg-emerald-950/20'
-                            : 'border-amber-200 bg-amber-50/60 dark:border-amber-900 dark:bg-amber-950/20'
-                        )}
-                      >
-                        <div className="flex items-center gap-2">
-                          {selectedCampaign.reviewState === 'approved' ? (
-                            <CheckCircle2 className="size-4 text-emerald-600" />
-                          ) : (
-                            <ShieldAlert className="size-4 text-amber-600" />
-                          )}
-                          <p className="text-sm font-medium">
-                            {selectedCampaign.reviewState === 'approved'
-                              ? 'Ready to launch'
-                              : selectedCampaign.reviewState === 'draft'
-                                ? 'Draft not yet reviewed'
-                                : 'Review required'}
-                          </p>
-                        </div>
-                        <p className="mt-2 text-sm text-muted-foreground">{selectedCampaign.nextAction}</p>
-                      </div>
-
-                      <div className="grid gap-3 sm:grid-cols-2">
-                        <div className="rounded-xl border bg-background p-3">
-                          <p className="text-xs uppercase tracking-wide text-muted-foreground">Audience</p>
-                          <p className="mt-1 text-lg font-semibold">{formatNumber(selectedCampaign.audienceCount)}</p>
-                          <p className="text-xs text-muted-foreground">Rows in the campaign audience.</p>
-                        </div>
-                        <div className="rounded-xl border bg-background p-3">
-                          <p className="text-xs uppercase tracking-wide text-muted-foreground">Eligible</p>
-                          <p className="mt-1 text-lg font-semibold">{formatNumber(selectedCampaign.eligibleCount)}</p>
-                          <p className="text-xs text-muted-foreground">Rows ready to move forward.</p>
-                        </div>
-                        <div className="rounded-xl border bg-background p-3">
-                          <p className="text-xs uppercase tracking-wide text-muted-foreground">Suppressed</p>
-                          <p className="mt-1 text-lg font-semibold text-red-700 dark:text-red-400">
-                            {formatNumber(selectedCampaign.suppressedCount)}
-                          </p>
-                          <p className="text-xs text-muted-foreground">Blocked by global suppression.</p>
-                        </div>
-                        <div className="rounded-xl border bg-background p-3">
-                          <p className="text-xs uppercase tracking-wide text-muted-foreground">Ineligible</p>
-                          <p className="mt-1 text-lg font-semibold text-amber-700 dark:text-amber-300">
-                            {formatNumber(selectedCampaign.ineligibleCount)}
-                          </p>
-                          <p className="text-xs text-muted-foreground">Ownership or destination issues.</p>
-                        </div>
-                      </div>
-
-                      <div className="space-y-3">
-                        {getReviewChecklist(selectedCampaign).map((check) => (
-                          <div key={check.label} className="flex items-start gap-3 rounded-xl border bg-background p-3">
-                            <div
-                              className={cn(
-                                'mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full',
-                                check.ok
-                                  ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
-                                  : 'bg-amber-100 text-amber-700 dark:bg-amber-950/40 dark:text-amber-300'
-                              )}
-                            >
-                              {check.ok ? <CheckCircle2 className="size-3.5" /> : <XCircle className="size-3.5" />}
-                            </div>
-                            <div className="min-w-0">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <p className="text-sm font-medium">{check.label}</p>
-                                {getStateBadge(check.ok ? 'approved' : 'review_required')}
-                              </div>
-                              <p className="mt-1 text-sm text-muted-foreground">{check.detail}</p>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-
-                      {getCampaignIssueSummary(selectedCampaign).length > 0 ? (
-                        <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 text-amber-900 dark:border-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
-                          <div className="flex items-center gap-2">
-                            <AlertCircle className="size-4" />
-                            <p className="text-sm font-medium">Blocked by the following items</p>
-                          </div>
-                          <div className="mt-3 space-y-2">
-                            {getCampaignIssueSummary(selectedCampaign).map((issue) => (
-                              <div key={issue.label} className="rounded-xl border border-amber-200/70 bg-background/80 p-3 dark:border-amber-900/70 dark:bg-zinc-950/80">
-                                <p className="text-sm font-medium">{issue.label}</p>
-                                <p className="mt-1 text-sm text-muted-foreground">{issue.detail}</p>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ) : null}
-                    </>
-                  ) : (
-                    <EmptyState
-                      icon={Megaphone}
-                      title="No campaign selected"
-                      description="Pick a campaign to see its review state and launch requirements."
-                      actionLabel="Select a campaign"
-                      onAction={() => setActiveTab('builder')}
-                    />
-                  )}
-                </CardContent>
-              </Card>
-            </div>
-          )}
+          <MarketingWorkflowBuilder
+            campaigns={campaigns as WorkflowCampaignRecord[]}
+            selectedCampaignId={selectedCampaignId}
+            onSelectCampaign={setSelectedCampaignId}
+            onSaveWorkflow={persistWorkflow}
+          />
         </TabsContent>
 
         <TabsContent value="audience" className="space-y-6">
@@ -1662,7 +1339,17 @@ export function MarketingCommandCenter() {
                   <ScrollArea className="h-[28rem] pr-4">
                     <div className="space-y-3">
                       {imports.map((batch) => (
-                        <div key={batch.id} className="rounded-2xl border bg-background p-4">
+                        <button
+                          key={batch.id}
+                          type="button"
+                          onClick={() => setSelectedImportId(batch.id)}
+                          className={cn(
+                            'w-full rounded-2xl border p-4 text-left transition-colors',
+                            batch.id === selectedImport?.id
+                              ? 'border-sky-300 bg-sky-50/70 dark:border-sky-900 dark:bg-sky-950/20'
+                              : 'bg-background hover:bg-muted/50'
+                          )}
+                        >
                           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
                             <div>
                               <div className="flex items-center gap-2">
@@ -1738,7 +1425,7 @@ export function MarketingCommandCenter() {
                               </ul>
                             </div>
                           ) : null}
-                        </div>
+                        </button>
                       ))}
                     </div>
                   </ScrollArea>
@@ -1779,6 +1466,77 @@ export function MarketingCommandCenter() {
                     </p>
                     <p className="mt-1 text-sm text-muted-foreground">Rows ready to move into the queue.</p>
                   </div>
+                </div>
+
+                <div className="rounded-2xl border bg-background p-4">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <p className="text-sm font-medium">Visual mapping</p>
+                      <p className="text-xs text-muted-foreground">
+                        Follow how a raw row becomes a campaign-ready contact without reading technical field names.
+                      </p>
+                    </div>
+                    {selectedImport ? <Badge variant="outline">{selectedImport.name}</Badge> : null}
+                  </div>
+
+                  {selectedImport ? (
+                    <div className="mt-4 space-y-4">
+                      <div className="grid gap-3 lg:grid-cols-4">
+                        <div className="rounded-xl border bg-muted/20 p-3">
+                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">1. Intake</p>
+                          <p className="mt-2 text-sm font-medium">{formatNumber(selectedImport.totalRows)} raw rows</p>
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            The import brings in addresses, owners, and contact data from the selected source.
+                          </p>
+                        </div>
+                        <div className="rounded-xl border bg-muted/20 p-3">
+                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">2. Mapping</p>
+                          <p className="mt-2 text-sm font-medium">{formatNumber(selectedImport.importedRows)} mapped rows</p>
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            Names, addresses, phones, and emails are matched into the campaign audience model.
+                          </p>
+                        </div>
+                        <div className="rounded-xl border bg-muted/20 p-3">
+                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">3. Eligibility</p>
+                          <p className="mt-2 text-sm font-medium">{formatNumber(selectedImport.skippedRows + selectedImport.suppressedRows)} flagged rows</p>
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            Suppression hits and missing destinations are marked before the user can launch anything.
+                          </p>
+                        </div>
+                        <div className="rounded-xl border bg-muted/20 p-3">
+                          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">4. Ready queue</p>
+                          <p className="mt-2 text-sm font-medium">{formatNumber(selectedImport.importedRows)} audience rows</p>
+                          <p className="mt-1 text-sm text-muted-foreground">
+                            Once review passes, only the clean rows move forward into launchable campaigns.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border bg-muted/20 p-4">
+                        <p className="text-sm font-medium">Field mapping in plain English</p>
+                        <div className="mt-3 space-y-2">
+                          {importFieldMapping.map((mapping) => (
+                            <div key={mapping.source} className="flex flex-col gap-2 rounded-xl border bg-background p-3 lg:flex-row lg:items-center lg:justify-between">
+                              <div className="min-w-0">
+                                <p className="text-sm font-medium">{mapping.source}</p>
+                                <p className="mt-1 text-sm text-muted-foreground">{mapping.detail}</p>
+                              </div>
+                              <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                                <ArrowRight className="size-4" />
+                                <span>{mapping.target}</span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  ) : (
+                    <EmptyState
+                      icon={Upload}
+                      title="Choose an import"
+                      description="Select a batch on the left to see how its rows are mapped into the audience model."
+                    />
+                  )}
                 </div>
 
                 <div className="rounded-2xl border bg-muted/20 p-4">

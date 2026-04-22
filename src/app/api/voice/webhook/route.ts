@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server'
 import { RestClient } from '@/lib/signalwire/compatibility-api'
 import { createAdminClient } from '@/lib/supabase/server'
 import {
+  buildCommunicationThreadKey,
+  normalizeCommunicationStatus,
+} from '@/lib/marketing/communications'
+import {
   getUserPhoneNumberByNumber,
   getUserPhoneNumberForUser,
 } from '@/lib/signalwire/user-phone-numbers'
@@ -10,7 +14,7 @@ import { normalizePhoneNumber } from '@/lib/utils'
 export const runtime = 'nodejs'
 
 type VoiceWebhookParams = Record<string, string>
-type NormalizedVoiceStatus = 'answered' | 'voicemail_left' | 'no_answer' | 'failed'
+type NormalizedVoiceStatus = 'queued' | 'answered' | 'voicemail_left' | 'no_answer' | 'failed'
 
 function getFormValue(params: VoiceWebhookParams, ...keys: string[]) {
   for (const key of keys) {
@@ -107,52 +111,12 @@ function normalizeVoiceStatus(
   callStatus: string | null,
   params: VoiceWebhookParams
 ): NormalizedVoiceStatus {
-  const normalized = (callStatus || '').trim().toLowerCase()
-  const answeredBy = getFormValue(params, 'AnsweredBy', 'answeredBy', 'answered_by')?.toLowerCase() || ''
-  const isMachineAnswer = /machine|fax|voicemail|amd|answering_machine/.test(answeredBy)
-  const isVoicemail = isVoicemailCampaign(params)
-
-  if (!normalized) {
-    return isVoicemail && isMachineAnswer ? 'voicemail_left' : 'answered'
-  }
-
-  if (normalized.includes('busy')) {
-    return 'no_answer'
-  }
-
-  if (
-    normalized.includes('no-answer') ||
-    normalized.includes('no_answer') ||
-    normalized.includes('no answer') ||
-    normalized.includes('unanswered')
-  ) {
-    return 'no_answer'
-  }
-
-  if (
-    normalized.includes('canceled') ||
-    normalized.includes('cancelled') ||
-    normalized.includes('failed') ||
-    normalized.includes('error') ||
-    normalized.includes('timeout') ||
-    normalized.includes('rejected')
-  ) {
-    return normalized.includes('busy') ? 'no_answer' : 'failed'
-  }
-
-  if (normalized.includes('answered')) {
-    return 'answered'
-  }
-
-  if (normalized.includes('completed')) {
-    return isVoicemail || isMachineAnswer ? 'voicemail_left' : 'answered'
-  }
-
-  if (normalized.includes('in-progress') || normalized.includes('in_progress') || normalized.includes('ringing')) {
-    return 'answered'
-  }
-
-  return isVoicemail && isMachineAnswer ? 'voicemail_left' : 'answered'
+  return normalizeCommunicationStatus({
+    channel: 'voice',
+    status: callStatus,
+    answeredBy: getFormValue(params, 'AnsweredBy', 'answeredBy', 'answered_by'),
+    isVoicemailCampaign: isVoicemailCampaign(params),
+  }) as NormalizedVoiceStatus
 }
 
 function getEventTimestamp(params: VoiceWebhookParams) {
@@ -160,10 +124,6 @@ function getEventTimestamp(params: VoiceWebhookParams) {
     getFormValue(params, 'Timestamp', 'timestamp', 'EventTimestamp', 'eventTimestamp') ||
     new Date().toISOString()
   )
-}
-
-function buildThreadKey(ownerUserId: string, propertyId: string | null, contactId: string | null, destination: string) {
-  return [ownerUserId, propertyId || 'null', contactId || 'null', destination].join(':').toLowerCase()
 }
 
 async function resolveVoiceOwnership(params: VoiceWebhookParams) {
@@ -272,7 +232,7 @@ async function upsertCommunicationThread(
     eventAt: string
   }
 ) {
-  const threadKey = buildThreadKey(
+  const threadKey = buildCommunicationThreadKey(
     context.ownerUserId,
     context.propertyId,
     context.contactId,

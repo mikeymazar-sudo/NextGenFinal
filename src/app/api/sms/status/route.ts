@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { RestClient } from '@/lib/signalwire/compatibility-api'
-import { updateMessageStatus } from '@/lib/twilio/sms'
+import { updateSmsDeliveryStatus } from '@/lib/marketing/communications'
 
 export const runtime = 'nodejs'
 
@@ -55,12 +55,12 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    await updateMessageStatus(
-      MessageSid?.toString() || '',
-      MessageStatus?.toString() || '',
-      ErrorCode?.toString(),
-      ErrorMessage?.toString()
-    )
+    await updateSmsDeliveryStatus({
+      messageSid: MessageSid?.toString() || '',
+      status: MessageStatus?.toString() || '',
+      errorCode: ErrorCode?.toString(),
+      errorMessage: ErrorMessage?.toString(),
+    })
 
     return new NextResponse('OK', { status: 200 })
   } catch (error: unknown) {

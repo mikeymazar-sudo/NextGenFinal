@@ -1,6 +1,8 @@
 import { createAdminClient } from '@/lib/supabase/server'
 import { normalizePhoneNumber } from '@/lib/utils'
 import { resolveMarketingActor } from '@/lib/marketing/actor'
+import { evaluateDestinationConsent } from '@/lib/marketing/destination-consent'
+import { checkMarketingSuppression } from '@/lib/marketing/suppression'
 
 type MaybeRecord = Record<string, unknown> | null
 
@@ -17,7 +19,7 @@ export type MarketingCampaignRecord = {
   owner_user_id: string
   team_id: string | null
   name: string
-  channel: 'sms' | 'email' | 'voice'
+  channel: 'sms' | 'email' | 'voice' | 'multi'
   status: string
   review_state: string
   launch_state: string
@@ -78,14 +80,7 @@ type PropertyRow = {
   raw_realestate_data: MaybeRecord
 }
 
-type SuppressionRow = {
-  channel: string
-  destination: string | null
-  contact_id: string | null
-  property_id: string | null
-  status: string | null
-  resolved_at: string | null
-}
+type ReviewDeliveryChannel = 'sms' | 'email' | 'voice'
 
 function coerceRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -330,6 +325,7 @@ export async function buildCampaignReview(campaign: MarketingCampaignRecord) {
   const supabase = createAdminClient()
   const audience = await resolveCampaignAudience(campaign)
   const propertyIds = audience.map((property) => property.id)
+  const steps = await getCampaignSteps(campaign.id)
 
   const contacts = propertyIds.length
     ? await safeSelect(
@@ -341,32 +337,6 @@ export async function buildCampaignReview(campaign: MarketingCampaignRecord) {
       ) as ContactRow[]
     : []
 
-  const suppressions = await safeSelect(
-    'campaign suppressions',
-    supabase
-      .from('global_suppressions')
-      .select('channel, destination, contact_id, property_id, status, resolved_at')
-      .eq('owner_user_id', campaign.owner_user_id)
-  ) as SuppressionRow[]
-
-  const suppressionsByChannel = new Map<string, Set<string>>()
-  const activeSuppressions = suppressions.filter(
-    (entry) => entry.status !== 'resolved' && entry.resolved_at === null
-  )
-
-  for (const suppression of activeSuppressions) {
-    if (!suppression.destination) continue
-    const channel = suppression.channel || 'all'
-    if (!suppressionsByChannel.has(channel)) {
-      suppressionsByChannel.set(channel, new Set())
-    }
-    suppressionsByChannel.get(channel)?.add(
-      campaign.channel === 'email'
-        ? normalizeEmail(suppression.destination) || suppression.destination
-        : normalizePhoneNumber(suppression.destination) || suppression.destination
-    )
-  }
-
   const contactsByProperty = new Map<string, ContactRow[]>()
   for (const contact of contacts) {
     const existing = contactsByProperty.get(contact.property_id) || []
@@ -374,35 +344,174 @@ export async function buildCampaignReview(campaign: MarketingCampaignRecord) {
     contactsByProperty.set(contact.property_id, existing)
   }
 
-  const reviewRows = audience.map((property) => {
+  const requiredChannels = (() => {
+    const channels = new Set<ReviewDeliveryChannel>()
+
+    for (const step of steps) {
+      const nodeKind = coerceRecord(step)?.node_kind
+      const actionType = typeof (step as { action_type?: unknown }).action_type === 'string'
+        ? (step as { action_type: string }).action_type.toLowerCase()
+        : ''
+      const channel = typeof (step as { channel?: unknown }).channel === 'string'
+        ? (step as { channel: string }).channel.toLowerCase()
+        : ''
+
+      if (nodeKind === 'sms' || channel === 'sms') {
+        channels.add('sms')
+        continue
+      }
+
+      if (nodeKind === 'email' || channel === 'email') {
+        channels.add('email')
+        continue
+      }
+
+      if (
+        nodeKind === 'voicemail' ||
+        channel === 'voice' ||
+        actionType.includes('voicemail') ||
+        actionType.includes('drop_voicemail')
+      ) {
+        channels.add('voice')
+      }
+    }
+
+    if (channels.size === 0) {
+      if (campaign.channel === 'email') {
+        channels.add('email')
+      } else if (campaign.channel === 'voice') {
+        channels.add('voice')
+      } else {
+        channels.add('sms')
+      }
+    }
+
+    return Array.from(channels)
+  })()
+
+  const getFailurePriority = (status: string) => {
+    if (status === 'suppressed') return 3
+    if (status === 'missing_consent') return 2
+    if (status === 'missing_destination') return 1
+    return 0
+  }
+
+  const reviewRows = await Promise.all(audience.map(async (property) => {
     const propertyContacts = contactsByProperty.get(property.id) || []
     const contact = propertyContacts[0] || null
-    const destination =
-      campaign.channel === 'email'
-        ? pickContactEmail(contact) || pickPropertyEmail(property)
-        : pickContactPhone(contact) || pickPropertyPhone(property)
+    const phoneDestination = pickContactPhone(contact) || pickPropertyPhone(property)
+    const emailDestination = pickContactEmail(contact) || pickPropertyEmail(property)
 
     let eligibilityStatus = 'eligible'
     let eligibilityReason: string | null = null
+    let latestChannel: ReviewDeliveryChannel | null =
+      requiredChannels.includes('sms') ? 'sms' : requiredChannels[0] || null
 
-    if (!destination) {
-      eligibilityStatus = 'missing_destination'
-      eligibilityReason = campaign.channel === 'email' ? 'No email address found.' : 'No phone number found.'
+    const applyFailure = (status: string, reason: string, channel: ReviewDeliveryChannel) => {
+      if (getFailurePriority(status) >= getFailurePriority(eligibilityStatus)) {
+        eligibilityStatus = status
+        eligibilityReason = reason
+        latestChannel = channel
+      }
     }
 
-    const suppressionSet =
-      suppressionsByChannel.get(campaign.channel) || suppressionsByChannel.get('all')
+    if (requiredChannels.includes('sms') || requiredChannels.includes('voice')) {
+      if (!phoneDestination) {
+        applyFailure('missing_destination', 'No phone number found for SMS or voicemail steps.', 'sms')
+      }
+    }
 
-    if (destination && suppressionSet?.has(destination)) {
-      eligibilityStatus = 'suppressed'
-      eligibilityReason = 'Destination is globally suppressed.'
+    if (requiredChannels.includes('email') && !emailDestination) {
+      applyFailure('missing_destination', 'No email address found for email steps.', 'email')
+    }
+
+    if (phoneDestination && requiredChannels.includes('sms')) {
+      const suppression = await checkMarketingSuppression({
+        channel: 'sms',
+        destination: phoneDestination,
+        ownerUserId: campaign.owner_user_id,
+        propertyId: property.id,
+        contactId: contact?.id || null,
+        supabase,
+      })
+
+      if (!suppression.allowed) {
+        applyFailure('suppressed', 'SMS destination is globally suppressed.', 'sms')
+      } else {
+        const consent = await evaluateDestinationConsent({
+          supabase,
+          ownerUserId: campaign.owner_user_id,
+          channel: 'sms',
+          destination: phoneDestination,
+          propertyId: property.id,
+          contactId: contact?.id || null,
+        })
+
+        if (!consent.allowed) {
+          if (consent.reason === 'denied') {
+            applyFailure('suppressed', 'SMS consent is denied for this destination.', 'sms')
+          } else {
+            applyFailure('missing_consent', 'SMS destination is missing granted consent.', 'sms')
+          }
+        }
+      }
+    }
+
+    if (emailDestination && requiredChannels.includes('email')) {
+      const suppression = await checkMarketingSuppression({
+        channel: 'email',
+        destination: emailDestination,
+        ownerUserId: campaign.owner_user_id,
+        propertyId: property.id,
+        contactId: contact?.id || null,
+        supabase,
+      })
+
+      if (!suppression.allowed) {
+        applyFailure('suppressed', 'Email destination is globally suppressed.', 'email')
+      } else {
+        const consent = await evaluateDestinationConsent({
+          supabase,
+          ownerUserId: campaign.owner_user_id,
+          channel: 'email',
+          destination: emailDestination,
+          propertyId: property.id,
+          contactId: contact?.id || null,
+        })
+
+        if (!consent.allowed) {
+          if (consent.reason === 'denied') {
+            applyFailure('suppressed', 'Email consent is denied for this destination.', 'email')
+          } else {
+            applyFailure('missing_consent', 'Email destination is missing granted consent.', 'email')
+          }
+        }
+      }
+    }
+
+    if (phoneDestination && requiredChannels.includes('voice')) {
+      const suppression = await checkMarketingSuppression({
+        channel: 'voice',
+        destination: phoneDestination,
+        ownerUserId: campaign.owner_user_id,
+        propertyId: property.id,
+        contactId: contact?.id || null,
+        supabase,
+      })
+
+      if (!suppression.allowed) {
+        applyFailure('suppressed', 'Voicemail destination is globally suppressed.', 'voice')
+      }
     }
 
     return {
       property_id: property.id,
       contact_id: contact?.id || null,
-      latest_channel: campaign.channel,
-      destination,
+      latest_channel: latestChannel,
+      destination:
+        latestChannel === 'email'
+          ? emailDestination
+          : phoneDestination,
       review_state: 'review_required',
       delivery_status: eligibilityStatus === 'eligible' ? 'queued' : 'suppressed',
       eligibility_status: eligibilityStatus,
@@ -416,7 +525,7 @@ export async function buildCampaignReview(campaign: MarketingCampaignRecord) {
         contactName: contact?.name || property.owner_name,
       },
     }
-  })
+  }))
 
   return {
     audienceCount: audience.length,
@@ -424,6 +533,7 @@ export async function buildCampaignReview(campaign: MarketingCampaignRecord) {
     counts: {
       eligible: reviewRows.filter((row) => row.eligibility_status === 'eligible').length,
       suppressed: reviewRows.filter((row) => row.eligibility_status === 'suppressed').length,
+      missingConsent: reviewRows.filter((row) => row.eligibility_status === 'missing_consent').length,
       missingDestination: reviewRows.filter((row) => row.eligibility_status === 'missing_destination').length,
     },
   }

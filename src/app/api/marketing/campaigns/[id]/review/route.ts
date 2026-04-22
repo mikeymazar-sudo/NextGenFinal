@@ -39,12 +39,12 @@ export const POST = withAuth(async (_request: NextRequest, { user, params }) => 
       }
     }
 
-    const nextReviewState = review.counts.eligible > 0 ? 'review_required' : 'draft'
+    const nextReviewState = review.counts.eligible > 0 ? 'approved' : 'draft'
     const { error: campaignError } = await supabase
       .from('campaigns')
       .update({
         review_state: nextReviewState,
-        status: review.counts.eligible > 0 ? 'review_required' : 'draft',
+        status: review.counts.eligible > 0 ? 'approved' : 'draft',
         updated_at: new Date().toISOString(),
       })
       .eq('id', campaign.id)

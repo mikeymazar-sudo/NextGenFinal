@@ -17,6 +17,7 @@ import {
   normalizeEmailProviderStatus,
   recordOutboundEmailCommunication,
 } from '@/lib/marketing/communications'
+import { evaluateDestinationConsent } from '@/lib/marketing/destination-consent'
 import { checkMarketingSuppression } from '@/lib/marketing/suppression'
 
 const SendEmailSchema = z.object({
@@ -170,6 +171,33 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
         'SUPPRESSED',
         403,
         suppression.matchedSuppression
+      )
+    }
+
+    const consentCheck = await evaluateDestinationConsent({
+      supabase,
+      ownerUserId: user.id,
+      channel: 'email',
+      destination: normalizedRecipient,
+      propertyId: propertyId || null,
+    })
+
+    if (!consentCheck.allowed) {
+      const consentMessage =
+        consentCheck.reason === 'denied'
+          ? 'Destination consent is denied for email.'
+          : consentCheck.reason === 'unavailable'
+          ? 'Unable to verify email consent right now.'
+          : 'Destination consent is required for email.'
+
+      return apiError(
+        consentMessage,
+        consentCheck.reason === 'denied'
+          ? 'CONSENT_DENIED'
+          : consentCheck.reason === 'unavailable'
+          ? 'CONSENT_LOOKUP_UNAVAILABLE'
+          : 'MISSING_CONSENT',
+        403
       )
     }
 

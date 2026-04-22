@@ -7,6 +7,7 @@ import { getCampaignEnrollments, getCampaignSteps, getOwnedCampaign } from '@/ap
 
 const UpdateCampaignSchema = z.object({
   name: z.string().min(1).max(120).optional(),
+  channel: z.enum(['sms', 'email', 'voice', 'multi']).optional(),
   audienceSourceType: z.string().nullable().optional(),
   audienceSourceId: z.string().uuid().nullable().optional(),
   draftPayload: z.record(z.string(), z.unknown()).optional(),
@@ -53,6 +54,7 @@ export const PATCH = withAuth(async (request: NextRequest, { user, params }) => 
     }
 
     if (parsed.data.name !== undefined) updates.name = parsed.data.name
+    if (parsed.data.channel !== undefined) updates.channel = parsed.data.channel
     if (parsed.data.audienceSourceType !== undefined) updates.audience_source_type = parsed.data.audienceSourceType
     if (parsed.data.audienceSourceId !== undefined) updates.audience_source_id = parsed.data.audienceSourceId
     if (parsed.data.draftPayload !== undefined) updates.draft_payload = parsed.data.draftPayload

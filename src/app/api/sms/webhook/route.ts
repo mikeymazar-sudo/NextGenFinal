@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { RestClient } from '@/lib/signalwire/compatibility-api'
-import { storeIncomingMessage } from '@/lib/twilio/sms'
+import { recordInboundSmsCommunication } from '@/lib/marketing/communications'
 
 export const runtime = 'nodejs'
 
@@ -56,7 +56,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    await storeIncomingMessage({
+    await recordInboundSmsCommunication({
       from: From?.toString() || '',
       to: To?.toString() || '',
       body: Body?.toString() || '',

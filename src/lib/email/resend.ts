@@ -18,6 +18,16 @@ export const EMAIL_CONFIG = {
   },
 }
 
+export type ResendReplyContext = {
+  campaignId?: string | null
+  campaignVersionId?: string | null
+  contactRunId?: string | null
+  stepRunId?: string | null
+  threadId?: string | null
+  ownerUserId?: string | null
+  recipient?: string | null
+}
+
 // Email types
 export interface SendEmailOptions {
   to: string | string[]
@@ -25,9 +35,61 @@ export interface SendEmailOptions {
   html: string
   from?: string
   replyTo?: string
+  replyToken?: string | ResendReplyContext
   cc?: string | string[]
   bcc?: string | string[]
   tags?: Array<{ name: string; value: string }>
+}
+
+function getReplyTokenPayload(value: string | ResendReplyContext) {
+  if (typeof value === 'string') {
+    return value.trim()
+  }
+
+  const payload: Record<string, string> = {}
+  for (const [key, entry] of Object.entries(value)) {
+    if (typeof entry === 'string' && entry.trim()) {
+      payload[key] = entry.trim()
+    }
+  }
+
+  return Buffer.from(JSON.stringify(payload)).toString('base64url')
+}
+
+export function buildAppOwnedReplyToAddress(tokenOrContext: string | ResendReplyContext) {
+  const token = getReplyTokenPayload(tokenOrContext)
+  return `reply+${token}@${EMAIL_CONFIG.domain}`
+}
+
+export function extractAppOwnedReplyToken(address: string | null | undefined) {
+  const normalized = (address || '').trim()
+  if (!normalized) {
+    return null
+  }
+
+  const angleBracketMatch = normalized.match(/<([^>]+)>/)
+  const candidate = (angleBracketMatch ? angleBracketMatch[1] : normalized).toLowerCase()
+  const localPartMatch = candidate.match(/reply\+([^@]+)@/)
+  return localPartMatch ? localPartMatch[1] : null
+}
+
+export function decodeAppOwnedReplyToken(token: string | null | undefined) {
+  const normalized = (token || '').trim()
+  if (!normalized) {
+    return null
+  }
+
+  try {
+    const decoded = Buffer.from(normalized, 'base64url').toString('utf8')
+    const parsed = JSON.parse(decoded)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return null
+    }
+
+    return parsed as ResendReplyContext
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -37,12 +99,16 @@ export interface SendEmailOptions {
  */
 export async function sendEmail(options: SendEmailOptions) {
   try {
+    const replyTo =
+      options.replyTo ||
+      (options.replyToken ? buildAppOwnedReplyToAddress(options.replyToken) : undefined)
+
     const { data, error } = await getResendClient().emails.send({
       from: options.from || EMAIL_CONFIG.from.default,
       to: options.to,
       subject: options.subject,
       html: options.html,
-      ...(options.replyTo && { replyTo: options.replyTo }),
+      ...(replyTo && { replyTo }),
       ...(options.cc && { cc: options.cc }),
       ...(options.bcc && { bcc: options.bcc }),
       ...(options.tags && { tags: options.tags }),

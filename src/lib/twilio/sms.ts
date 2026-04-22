@@ -10,6 +10,7 @@ import {
   applyInboundSmsSuppressionKeyword,
   normalizeSmsProviderStatus,
 } from '@/lib/marketing/communications'
+import { evaluateDestinationConsent } from '@/lib/marketing/destination-consent'
 import { checkMarketingSuppression } from '@/lib/marketing/suppression'
 
 function getSignalWireClient() {
@@ -136,17 +137,49 @@ export async function sendSMS(params: SendSMSParams): Promise<SMSResult> {
     throw new Error('Phone number must be in E.164 format (e.g., +1234567890)')
   }
 
+  const supabase = createAdminClient()
+
   const suppression = await checkMarketingSuppression({
     channel: 'sms',
     destination: normalizedTo,
     ownerUserId: ownerUserId || userId,
-  })
+  }, supabase)
 
   if (!suppression.allowed) {
     return {
       success: false,
       error: 'Destination is globally suppressed for SMS.',
       errorCode: 'SUPPRESSED',
+      status: 403,
+    }
+  }
+
+  const consentCheck = await evaluateDestinationConsent({
+    supabase,
+    ownerUserId: ownerUserId || userId,
+    channel: 'sms',
+    destination: normalizedTo,
+    contactId: contactId || null,
+    propertyId: propertyId || null,
+  })
+
+  if (!consentCheck.allowed) {
+    const reasonMessage =
+      consentCheck.reason === 'denied'
+        ? 'Destination consent is denied for SMS.'
+        : consentCheck.reason === 'missing_destination'
+        ? 'Missing SMS destination.'
+        : consentCheck.reason === 'unavailable'
+        ? 'Unable to verify SMS consent right now.'
+        : 'Destination consent is required for SMS.'
+
+    return {
+      success: false,
+      error: reasonMessage,
+      errorCode:
+        consentCheck.reason === 'denied' ? 'CONSENT_DENIED' : consentCheck.reason === 'unavailable'
+          ? 'CONSENT_LOOKUP_UNAVAILABLE'
+          : 'MISSING_CONSENT',
       status: 403,
     }
   }
@@ -162,7 +195,6 @@ export async function sendSMS(params: SendSMSParams): Promise<SMSResult> {
       ...(statusCallback ? { statusCallback } : {}),
     })
 
-    const supabase = createAdminClient()
     const { data, error } = await supabase
       .from('messages')
       .insert({

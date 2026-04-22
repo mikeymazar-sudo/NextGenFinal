@@ -105,6 +105,14 @@ export const GET = withAuth(async (_request: NextRequest, { user }) => {
               typeof draftPayload.voicemailAssetLabel === 'string'
                 ? draftPayload.voicemailAssetLabel
                 : 'None',
+            templatePresetId:
+              typeof draftPayload.templatePresetId === 'string'
+                ? draftPayload.templatePresetId
+                : '',
+            templateLabel:
+              typeof draftPayload.templateLabel === 'string'
+                ? draftPayload.templateLabel
+                : '',
           },
           steps: steps.map((step, index) => {
             const payload = ((step as { content_payload?: Record<string, unknown> }).content_payload || {}) as Record<string, unknown>

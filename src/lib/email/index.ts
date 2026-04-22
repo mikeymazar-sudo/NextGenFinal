@@ -8,6 +8,10 @@ export {
   sendEmailFrom,
   sendBulkEmails,
   EMAIL_CONFIG,
+  buildAppOwnedReplyToAddress,
+  extractAppOwnedReplyToken,
+  decodeAppOwnedReplyToken,
+  type ResendReplyContext,
   type SendEmailOptions,
 } from './resend'
 

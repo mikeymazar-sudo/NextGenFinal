@@ -363,7 +363,7 @@ class ApiClient {
 
   async createMarketingCampaign(payload: {
     name: string
-    channel: 'sms' | 'email' | 'voice'
+    channel: 'sms' | 'email' | 'voice' | 'multi'
     audienceSourceType?: string
     audienceSourceId?: string
     draftPayload?: Record<string, unknown>
@@ -384,19 +384,42 @@ class ApiClient {
   }
 
   async updateMarketingCampaign(
-    campaignId: string,
-    payload: {
-      name?: string
-      audienceSourceType?: string | null
-      audienceSourceId?: string | null
-      draftPayload?: Record<string, unknown>
-      reviewState?: string
+      campaignId: string,
+      payload: {
+        name?: string
+        channel?: 'sms' | 'email' | 'voice' | 'multi'
+        audienceSourceType?: string | null
+        audienceSourceId?: string | null
+        draftPayload?: Record<string, unknown>
+        reviewState?: string
     }
   ) {
     return this.request<{ campaign: Record<string, unknown> }>(`/api/marketing/campaigns/${campaignId}`, {
       method: 'PATCH',
       body: JSON.stringify(payload),
     })
+  }
+
+  async getMarketingWorkflow(campaignId: string) {
+    return this.request<import('@/types/marketing-workflow').WorkflowRouteResponse>(
+      `/api/marketing/campaigns/${campaignId}/workflow`
+    )
+  }
+
+  async updateMarketingWorkflow(
+    campaignId: string,
+    payload: {
+      nodes: import('@/types/marketing-workflow').WorkflowNode[]
+      edges: import('@/types/marketing-workflow').WorkflowEdge[]
+    }
+  ) {
+    return this.request<import('@/types/marketing-workflow').WorkflowRouteResponse>(
+      `/api/marketing/campaigns/${campaignId}/workflow`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }
+    )
   }
 
   async reviewMarketingCampaign(campaignId: string) {

@@ -260,12 +260,32 @@ export interface PhoneEntry {
   value: string
   label: 'mobile' | 'work' | 'home'
   is_primary: boolean
+  consent_status?: 'granted' | 'denied' | 'unknown'
+  consent_source?:
+    | 'import'
+    | 'manual'
+    | 'sms_keyword'
+    | 'email_webhook'
+    | 'legacy'
+    | 'system'
+  consent_updated_at?: string | null
+  consent_note?: string | null
 }
 
 export interface EmailEntry {
   value: string
   label: 'personal' | 'business'
   is_primary: boolean
+  consent_status?: 'granted' | 'denied' | 'unknown'
+  consent_source?:
+    | 'import'
+    | 'manual'
+    | 'sms_keyword'
+    | 'email_webhook'
+    | 'legacy'
+    | 'system'
+  consent_updated_at?: string | null
+  consent_note?: string | null
 }
 
 export interface Contact {
@@ -336,6 +356,7 @@ export interface Message {
 }
 
 export type MarketingChannel = 'sms' | 'email' | 'voice'
+export type CampaignChannel = MarketingChannel | 'multi'
 
 export type CampaignLifecycleStatus =
   | 'draft'
@@ -353,6 +374,7 @@ export type CampaignReviewState = 'draft' | 'review_required' | 'approved' | 're
 export type CampaignEligibilityStatus =
   | 'eligible'
   | 'suppressed'
+  | 'missing_consent'
   | 'missing_destination'
   | 'invalid_destination'
   | 'duplicate'
@@ -385,7 +407,7 @@ export interface Campaign {
   owner_user_id: string
   team_id: string | null
   name: string
-  channel: MarketingChannel
+  channel: CampaignChannel
   status: CampaignLifecycleStatus
   review_state: CampaignReviewState
   launch_state: string
@@ -401,7 +423,7 @@ export interface CampaignStep {
   id: string
   campaign_id: string
   step_order: number
-  channel: MarketingChannel
+  channel: MarketingChannel | null
   action_type: string
   content_payload: Record<string, unknown>
   template_label: string | null

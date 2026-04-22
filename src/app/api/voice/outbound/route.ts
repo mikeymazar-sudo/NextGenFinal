@@ -59,6 +59,10 @@ function isVoicemailMode(params: Record<string, string>) {
   return isTruthyValue(getFormValue(params, 'Voicemail', 'voicemail', 'IsVoicemail', 'isVoicemail'))
 }
 
+function getAnsweredBy(params: Record<string, string>) {
+  return getFormValue(params, 'AnsweredBy', 'answeredBy', 'answered_by')?.toLowerCase() || null
+}
+
 export async function POST(req: NextRequest) {
   try {
     const params: Record<string, string> = {}
@@ -74,6 +78,8 @@ export async function POST(req: NextRequest) {
 
     const voicemailUrl = getVoicemailUrl(params)
     const isMarketingVoicemail = Boolean(voicemailUrl) || isVoicemailMode(params)
+    const answeredBy = getAnsweredBy(params)
+    const isMachineAnswer = Boolean(answeredBy && /machine|fax|voicemail|amd|answering_machine/.test(answeredBy))
     const destination = getFormValue(params, 'To', 'to')
     const callerId =
       getFormValue(params, 'CallerId', 'callerId', 'caller_id') ||
@@ -83,7 +89,9 @@ export async function POST(req: NextRequest) {
     const twiml = new RestClient.LaML.VoiceResponse()
 
     if (isMarketingVoicemail) {
-      if (voicemailUrl) {
+      if (answeredBy && !isMachineAnswer) {
+        twiml.hangup()
+      } else if (voicemailUrl) {
         twiml.play(voicemailUrl)
         twiml.hangup()
       } else {

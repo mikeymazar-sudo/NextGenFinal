@@ -5,13 +5,13 @@ import { withAuth } from '@/lib/auth/middleware';
 import { Errors, apiSuccess } from '@/lib/api/response';
 import { resolveMarketingActor } from '@/lib/marketing/actor';
 import { buildMarketingImportAudienceMetadata } from '@/lib/marketing/import-audience';
+import {
+    buildConsentMetadataFromImportRow,
+    createDestinationEntry,
+} from '@/lib/marketing/destination-consent';
 
 type ImportedPropertyRow = Record<string, string | undefined>;
-type ImportedContactEntry = {
-    value: string;
-    label: string;
-    is_primary: boolean;
-};
+type ImportedContactEntry = ReturnType<typeof createDestinationEntry>;
 type ImportedContactInsert = {
     property_id: string;
     name: string | null;
@@ -297,18 +297,33 @@ export const POST = withAuth(async (req: NextRequest, { user }) => {
 
                             if (uniquePhones.length === 0 && uniqueEmails.length === 0) continue;
 
+                            const phoneConsent = buildConsentMetadataFromImportRow(p, 'sms', importedAt);
+                            const emailConsent = buildConsentMetadataFromImportRow(p, 'email', importedAt);
+
                             contactsToInsert.push({
                                 property_id: propertyId,
                                 name: p.owner_name || null,
                                 phone_numbers: uniquePhones.map((v, idx) => ({
-                                    value: v,
-                                    label: 'mobile',
-                                    is_primary: idx === 0,
+                                    ...createDestinationEntry({
+                                        channel: 'sms',
+                                        value: v,
+                                        label: 'mobile',
+                                        isPrimary: idx === 0,
+                                        consent: phoneConsent,
+                                        defaultConsentSource: phoneConsent.consent_source,
+                                        defaultConsentUpdatedAt: importedAt,
+                                    }),
                                 })),
                                 emails: uniqueEmails.map((v, idx) => ({
-                                    value: v,
-                                    label: 'personal',
-                                    is_primary: idx === 0,
+                                    ...createDestinationEntry({
+                                        channel: 'email',
+                                        value: v,
+                                        label: 'personal',
+                                        isPrimary: idx === 0,
+                                        consent: emailConsent,
+                                        defaultConsentSource: emailConsent.consent_source,
+                                        defaultConsentUpdatedAt: importedAt,
+                                    }),
                                 })),
                             });
                         }

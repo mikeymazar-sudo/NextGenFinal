@@ -1,0 +1,4 @@
+interface:
+  display_name: "Marketing Workflow Builder"
+  short_description: "Maintain the workflow canvas, graph persistence, and launch snapshot contract"
+  default_prompt: "Use $marketing-workflow-builder to implement or audit the /marketing workflow builder, its fixed-lane graph model, draft persistence, consent-aware review, and immutable launch snapshots."

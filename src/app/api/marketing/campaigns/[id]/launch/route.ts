@@ -1,24 +1,28 @@
+import { randomUUID } from 'crypto'
 import { NextRequest } from 'next/server'
-import { RestClient } from '@/lib/signalwire/compatibility-api'
+
 import { withAuth } from '@/lib/auth/middleware'
 import { apiSuccess, Errors } from '@/lib/api/response'
 import { createAdminClient } from '@/lib/supabase/server'
 import {
+  buildCampaignReview,
   getCampaignEnrollments,
   getCampaignSteps,
-  getMarketingActorProfile,
   getOwnedCampaign,
 } from '@/app/api/marketing/_lib'
-import { normalizePhoneNumber } from '@/lib/utils'
-import { sendSMS } from '@/lib/twilio/sms'
-import { sendEmailFrom } from '@/lib/email/resend'
-import { baseEmailTemplate } from '@/lib/email/templates'
 import {
-  normalizeEmailAddress,
-  recordOutboundEmailCommunication,
-} from '@/lib/marketing/communications'
-import { checkMarketingSuppression } from '@/lib/marketing/suppression'
-import { ensureUserPhoneNumberForUser } from '@/lib/signalwire/user-phone-numbers'
+  normalizeDestinationEntries,
+} from '@/lib/marketing/destination-consent'
+import {
+  buildWorkflowDraftFromRows,
+  buildWorkflowEdgeRows,
+  buildWorkflowStepRows,
+  deriveWorkflowSummaryChannel,
+  getWorkflowEntryNode,
+  validateWorkflowDraft,
+} from '@/lib/marketing/workflow'
+import { normalizeEmailAddress } from '@/lib/marketing/communications'
+import { normalizePhoneNumber } from '@/lib/utils'
 
 type PropertyRow = {
   id: string
@@ -36,16 +40,19 @@ type ContactRow = {
   emails: unknown[] | null
 }
 
-function getSignalWireClient() {
-  const projectId = process.env.SIGNALWIRE_PROJECT_ID
-  const apiToken = process.env.SIGNALWIRE_API_TOKEN
-  const spaceUrl = process.env.SIGNALWIRE_SPACE_URL
+type SupabaseErrorLike = {
+  code?: string
+  message: string
+}
 
-  if (!projectId || !apiToken || !spaceUrl) {
-    throw new Error('Voice service is not configured.')
-  }
+function isMissingRelation(error: SupabaseErrorLike | null) {
+  if (!error) return false
 
-  return RestClient(projectId, apiToken, { signalwireSpaceUrl: spaceUrl })
+  return (
+    error.code === '42P01' ||
+    error.message.toLowerCase().includes('does not exist') ||
+    error.message.toLowerCase().includes('schema cache')
+  )
 }
 
 function coerceRecord(value: unknown): Record<string, unknown> | null {
@@ -54,38 +61,6 @@ function coerceRecord(value: unknown): Record<string, unknown> | null {
   }
 
   return value as Record<string, unknown>
-}
-
-function extractEntryValue(entry: unknown) {
-  if (typeof entry === 'string') {
-    return entry.trim() || null
-  }
-
-  const record = coerceRecord(entry)
-  const value = record?.value
-  return typeof value === 'string' && value.trim() ? value.trim() : null
-}
-
-function pickContactPhone(contact: ContactRow | null) {
-  const values = contact?.phone_numbers || []
-
-  for (const entry of values) {
-    const normalized = normalizePhoneNumber(extractEntryValue(entry) || '')
-    if (normalized) return normalized
-  }
-
-  return null
-}
-
-function pickContactEmail(contact: ContactRow | null) {
-  const values = contact?.emails || []
-
-  for (const entry of values) {
-    const normalized = normalizeEmailAddress(extractEntryValue(entry))
-    if (normalized) return normalized
-  }
-
-  return null
 }
 
 function pickPropertyPhone(property: PropertyRow) {
@@ -115,16 +90,131 @@ function pickPropertyEmail(property: PropertyRow) {
   return normalizeEmailAddress(email)
 }
 
-function getDraftString(payload: Record<string, unknown> | null, key: string) {
-  const value = payload?.[key]
-  return typeof value === 'string' ? value : null
+function getPhoneDestination(contact: ContactRow | null, property: PropertyRow) {
+  const entries = normalizeDestinationEntries(contact?.phone_numbers || [], 'sms', {
+    defaultConsentSource: 'legacy',
+  })
+
+  const primaryEntry =
+    entries.find((entry) => entry.is_primary) ||
+    entries.find((entry) => normalizePhoneNumber(entry.value)) ||
+    null
+  const propertyFallback = pickPropertyPhone(property)
+
+  return {
+    destination: primaryEntry?.value ? normalizePhoneNumber(primaryEntry.value) : propertyFallback,
+    consent: primaryEntry,
+  }
 }
 
-function isHttpUrl(value: string | null) {
-  return Boolean(value && /^https?:\/\//i.test(value))
+function getEmailDestination(contact: ContactRow | null, property: PropertyRow) {
+  const entries = normalizeDestinationEntries(contact?.emails || [], 'email', {
+    defaultConsentSource: 'legacy',
+  })
+
+  const primaryEntry =
+    entries.find((entry) => entry.is_primary) ||
+    entries.find((entry) => normalizeEmailAddress(entry.value)) ||
+    null
+  const propertyFallback = pickPropertyEmail(property)
+
+  return {
+    destination: primaryEntry?.value ? normalizeEmailAddress(primaryEntry.value) : propertyFallback,
+    consent: primaryEntry,
+  }
 }
 
-export const POST = withAuth(async (request: NextRequest, { user, params }) => {
+async function safeMaybeSingle<T>(
+  operation: PromiseLike<{ data: T | null; error: SupabaseErrorLike | null }>
+) {
+  const { data, error } = await operation
+
+  if (error) {
+    if (isMissingRelation(error)) {
+      return null
+    }
+
+    throw new Error(error.message)
+  }
+
+  return data
+}
+
+async function refreshCampaignEnrollments(campaignId: string, ownerUserId: string) {
+  const campaign = await getOwnedCampaign(campaignId, ownerUserId)
+  if (!campaign) {
+    throw new Error('Campaign not found.')
+  }
+
+  const review = await buildCampaignReview(campaign)
+  const supabase = createAdminClient()
+
+  await supabase.from('campaign_enrollments').delete().eq('campaign_id', campaign.id)
+
+  if (review.reviewRows.length > 0) {
+    const { error } = await supabase.from('campaign_enrollments').insert(
+      review.reviewRows.map((row) => {
+        const insertRow = Object.fromEntries(
+          Object.entries(row).filter(([key]) => key !== 'meta')
+        )
+
+        return {
+          campaign_id: campaign.id,
+          ...insertRow,
+        }
+      })
+    )
+
+    if (error) {
+      throw new Error(error.message)
+    }
+  }
+
+  return {
+    review,
+    enrollments: await getCampaignEnrollments(campaign.id),
+  }
+}
+
+async function loadLaunchDraft(campaignId: string, ownerUserId: string) {
+  const campaign = await getOwnedCampaign(campaignId, ownerUserId)
+  if (!campaign) {
+    throw new Error('Campaign not found.')
+  }
+
+  const supabase = createAdminClient()
+  const [draftVersion, legacySteps] = await Promise.all([
+    safeMaybeSingle(
+      supabase
+        .from('campaign_workflow_versions')
+        .select('*')
+        .eq('campaign_id', campaign.id)
+        .eq('state', 'draft')
+        .order('version_number', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+    ),
+    getCampaignSteps(campaign.id),
+  ])
+
+  const graphPayload =
+    draftVersion && typeof (draftVersion as Record<string, unknown>).graph_payload === 'object'
+      ? ((draftVersion as Record<string, unknown>).graph_payload as Record<string, unknown>)
+      : null
+
+  if (Array.isArray(graphPayload?.nodes) && graphPayload.nodes.length > 0) {
+    return validateWorkflowDraft({
+      nodes: graphPayload.nodes as Parameters<typeof validateWorkflowDraft>[0]['nodes'],
+      edges: Array.isArray(graphPayload?.edges) ? (graphPayload.edges as Parameters<typeof validateWorkflowDraft>[0]['edges']) : [],
+      readOnly: false,
+      convertedFromLegacy: false,
+    })
+  }
+
+  return buildWorkflowDraftFromRows(campaign, legacySteps as Record<string, unknown>[], [])
+}
+
+export const POST = withAuth(async (_request: NextRequest, { user, params }) => {
   try {
     const { id } = (await params) as { id: string }
     const campaign = await getOwnedCampaign(id, user.id)
@@ -133,8 +223,15 @@ export const POST = withAuth(async (request: NextRequest, { user, params }) => {
       return Errors.notFound('Campaign')
     }
 
-    const enrollments = await getCampaignEnrollments(campaign.id)
-    const eligibleEnrollments = enrollments.filter(
+    if (campaign.review_state !== 'approved') {
+      return Errors.badRequest('Campaign must be reviewed and approved before launch.')
+    }
+
+    const [draft, refreshed] = await Promise.all([
+      loadLaunchDraft(campaign.id, user.id),
+      refreshCampaignEnrollments(campaign.id, user.id),
+    ])
+    const eligibleEnrollments = refreshed.enrollments.filter(
       (enrollment) => (enrollment as { eligibility_status?: string }).eligibility_status === 'eligible'
     )
 
@@ -142,11 +239,15 @@ export const POST = withAuth(async (request: NextRequest, { user, params }) => {
       return Errors.badRequest('Campaign has no eligible enrollments to launch.')
     }
 
-    const supabase = createAdminClient()
-    const actor = await getMarketingActorProfile(user.id, user.email)
-    const draftPayload = (campaign.draft_payload || {}) as Record<string, unknown>
-    const steps = await getCampaignSteps(campaign.id)
+    const entryNode = getWorkflowEntryNode(draft.nodes, draft.edges)
+    const firstDeliveryNode =
+      draft.nodes.find((node) => node.kind === 'sms' || node.kind === 'email' || node.kind === 'voicemail') || entryNode
 
+    if (!entryNode || !firstDeliveryNode) {
+      return Errors.badRequest('Workflow is missing a launchable entry step.')
+    }
+
+    const supabase = createAdminClient()
     const propertyIds = Array.from(
       new Set(
         eligibleEnrollments
@@ -179,319 +280,261 @@ export const POST = withAuth(async (request: NextRequest, { user, params }) => {
 
     const propertyById = new Map((properties || []).map((property) => [property.id, property as PropertyRow]))
     const contactById = new Map((contacts || []).map((contact) => [contact.id, contact as ContactRow]))
+    const stepIdMap = new Map(draft.nodes.map((node) => [node.id, randomUUID()]))
+    const { data: nextVersionNumber, error: versionNumberError } = await supabase.rpc(
+      'next_campaign_workflow_version_number',
+      {
+        p_campaign_id: campaign.id,
+      }
+    )
 
-    const subject = getDraftString(draftPayload, 'subject') || `${campaign.name} update`
-    const message = getDraftString(draftPayload, 'message') || ''
-    const voicemailUrlFromDraft =
-      getDraftString(draftPayload, 'voicemailUrl') ||
-      getDraftString(draftPayload, 'voicemailAssetUrl')
-    const voiceStep = steps.find((step) => (step as { channel?: string }).channel === 'voice')
-    const voicePayload = ((voiceStep as { content_payload?: Record<string, unknown> } | undefined)?.content_payload || {}) as Record<string, unknown>
-    const voicemailUrl =
-      voicemailUrlFromDraft ||
-      getDraftString(voicePayload, 'voicemailUrl') ||
-      getDraftString(voicePayload, 'voicemailAssetUrl')
+    if (versionNumberError) {
+      return Errors.internal(versionNumberError.message)
+    }
 
-    let queued = 0
-    let sent = 0
-    let failed = 0
-    let suppressed = enrollments.filter(
-      (enrollment) => (enrollment as { eligibility_status?: string }).eligibility_status === 'suppressed'
-    ).length
-    const skipped = enrollments.length - eligibleEnrollments.length
-
-    await supabase
-      .from('campaigns')
-      .update({
-        review_state: 'approved',
-        status: 'launching',
-        launch_state: 'launching',
-        launched_at: campaign.launched_at || new Date().toISOString(),
-        updated_at: new Date().toISOString(),
+    const now = new Date().toISOString()
+    const { data: workflowVersion, error: workflowVersionError } = await supabase
+      .from('campaign_workflow_versions')
+      .insert({
+        campaign_id: campaign.id,
+        version_number: typeof nextVersionNumber === 'number' ? nextVersionNumber : 1,
+        state: 'launched',
+        entry_step_id: null,
+        graph_payload: {
+          nodes: draft.nodes,
+          edges: draft.edges,
+          summary: {
+            channel: deriveWorkflowSummaryChannel(draft.nodes),
+            nodeKinds: draft.nodes.map((node) => node.kind),
+          },
+        },
+        created_by: user.id,
+        launched_at: now,
       })
-      .eq('id', campaign.id)
-      .eq('owner_user_id', user.id)
+      .select('*')
+      .single()
 
-    const voiceAssignment =
-      campaign.channel === 'voice'
-        ? await ensureUserPhoneNumberForUser({
-            userId: user.id,
-            userEmail: user.email,
-            fullName: actor.full_name,
-            request,
+    if (workflowVersionError || !workflowVersion) {
+      return Errors.internal(workflowVersionError?.message || 'Failed to create workflow snapshot.')
+    }
+
+    const versionId = String((workflowVersion as Record<string, unknown>).id)
+    const versionedStepRows = buildWorkflowStepRows({
+      campaignId: campaign.id,
+      versionId,
+      nodes: draft.nodes,
+      idMap: stepIdMap,
+    })
+    const { error: stepInsertError } = await supabase
+      .from('campaign_steps')
+      .insert(versionedStepRows)
+
+    if (stepInsertError) {
+      return Errors.internal(stepInsertError.message)
+    }
+
+    if (draft.edges.length > 0) {
+      const versionedEdges = draft.edges.map((edge) => ({
+        ...edge,
+        sourceNodeId: stepIdMap.get(edge.sourceNodeId) || edge.sourceNodeId,
+        targetNodeId: stepIdMap.get(edge.targetNodeId) || edge.targetNodeId,
+      }))
+
+      const { error: edgeInsertError } = await supabase
+        .from('campaign_step_edges')
+        .insert(
+          buildWorkflowEdgeRows({
+            versionId,
+            edges: versionedEdges,
           })
-        : null
+        )
 
-    for (const enrollment of eligibleEnrollments) {
-      const enrollmentId = (enrollment as { id: string }).id
+      if (edgeInsertError) {
+        return Errors.internal(edgeInsertError.message)
+      }
+    }
+
+    const { error: versionUpdateError } = await supabase
+      .from('campaign_workflow_versions')
+      .update({
+        entry_step_id: stepIdMap.get(entryNode.id) || null,
+        updated_at: now,
+      })
+      .eq('id', versionId)
+
+    if (versionUpdateError) {
+      return Errors.internal(versionUpdateError.message)
+    }
+
+    const primaryChannel =
+      firstDeliveryNode.kind === 'email'
+        ? 'email'
+        : firstDeliveryNode.kind === 'voicemail'
+          ? 'voice'
+          : 'sms'
+
+    const contactRunRows = eligibleEnrollments.flatMap((enrollment) => {
       const propertyId = (enrollment as { property_id: string }).property_id
       const contactId = (enrollment as { contact_id?: string | null }).contact_id || null
       const property = propertyById.get(propertyId)
       const contact = contactId ? contactById.get(contactId) || null : null
 
       if (!property) {
-        failed += 1
-        await supabase
-          .from('campaign_enrollments')
-          .update({
-            review_state: 'approved',
-            delivery_status: 'failed',
-            latest_channel: campaign.channel,
-          })
-          .eq('id', enrollmentId)
-        continue
+        return []
       }
 
-      if (campaign.channel === 'sms') {
-        const destination = pickContactPhone(contact) || pickPropertyPhone(property)
-        if (!destination) {
-          failed += 1
-          await supabase
-            .from('campaign_enrollments')
-            .update({
-              review_state: 'approved',
-              delivery_status: 'failed',
-              latest_channel: 'sms',
-            })
-            .eq('id', enrollmentId)
-          continue
-        }
+      const smsDestination = getPhoneDestination(contact, property)
+      const emailDestination = getEmailDestination(contact, property)
+      const voiceDestination = getPhoneDestination(contact, property)
+      const primaryDestination =
+        primaryChannel === 'email'
+          ? emailDestination
+          : primaryChannel === 'voice'
+            ? voiceDestination
+            : smsDestination
 
-        const result = await sendSMS({
-          userId: user.id,
-          userEmail: user.email,
-          fullName: actor.full_name,
-          ownerUserId: user.id,
-          to: destination,
-          body: message,
-          contactId: contactId || undefined,
-          propertyId,
-          request,
-        })
-
-        const deliveryStatus =
-          result.errorCode === 'SUPPRESSED'
-            ? 'suppressed'
-            : result.success
-              ? 'sent'
-              : 'failed'
-
-        if (deliveryStatus === 'suppressed') suppressed += 1
-        else if (deliveryStatus === 'sent') sent += 1
-        else failed += 1
-
-        await supabase
-          .from('campaign_enrollments')
-          .update({
-            review_state: 'approved',
-            delivery_status: deliveryStatus,
-            latest_channel: 'sms',
-            last_communication_id: result.messageId || null,
-          })
-          .eq('id', enrollmentId)
-
-        continue
+      if (!primaryDestination.destination) {
+        return []
       }
 
-      if (campaign.channel === 'email') {
-        const destination = pickContactEmail(contact) || pickPropertyEmail(property)
-        if (!destination) {
-          failed += 1
-          await supabase
-            .from('campaign_enrollments')
-            .update({
-              review_state: 'approved',
-              delivery_status: 'failed',
-              latest_channel: 'email',
-            })
-            .eq('id', enrollmentId)
-          continue
-        }
+      return [{
+        campaign_id: campaign.id,
+        workflow_version_id: versionId,
+        campaign_enrollment_id: (enrollment as { id: string }).id,
+        owner_user_id: user.id,
+        property_id: propertyId,
+        contact_id: contactId,
+        primary_channel: primaryChannel,
+        destination: primaryDestination.destination,
+        consent_status:
+          primaryChannel === 'voice'
+            ? (primaryDestination.consent?.consent_status || 'granted')
+            : (primaryDestination.consent?.consent_status || 'unknown'),
+        consent_source: primaryDestination.consent?.consent_source || 'legacy',
+        consent_updated_at: primaryDestination.consent?.consent_updated_at || null,
+        status: 'queued',
+        current_step_order: entryNode.sequence,
+        next_due_at: now,
+        launched_at: now,
+        execution_context: {
+          launch_snapshot: {
+            campaign_id: campaign.id,
+            workflow_version_id: versionId,
+            launched_at: now,
+          },
+          contact: {
+            id: contactId,
+            name: contact?.name || property.owner_name || null,
+          },
+          property: {
+            id: property.id,
+            address: property.address,
+          },
+          destinations: {
+            sms: smsDestination.destination
+              ? {
+                  destination: smsDestination.destination,
+                  consent_status: smsDestination.consent?.consent_status || 'unknown',
+                  consent_source: smsDestination.consent?.consent_source || 'legacy',
+                  consent_updated_at: smsDestination.consent?.consent_updated_at || null,
+                }
+              : null,
+            email: emailDestination.destination
+              ? {
+                  destination: emailDestination.destination,
+                  consent_status: emailDestination.consent?.consent_status || 'unknown',
+                  consent_source: emailDestination.consent?.consent_source || 'legacy',
+                  consent_updated_at: emailDestination.consent?.consent_updated_at || null,
+                }
+              : null,
+            voice: voiceDestination.destination
+              ? {
+                  destination: voiceDestination.destination,
+                  consent_status: voiceDestination.consent?.consent_status || 'granted',
+                  consent_source: voiceDestination.consent?.consent_source || 'system',
+                  consent_updated_at: voiceDestination.consent?.consent_updated_at || null,
+                }
+              : null,
+          },
+        },
+      }]
+    })
 
-        const suppressionCheck = await checkMarketingSuppression({
-          channel: 'email',
-          destination,
-          ownerUserId: user.id,
-          propertyId,
-          contactId,
-        })
+    if (contactRunRows.length === 0) {
+      return Errors.badRequest('No eligible contact runs could be seeded for launch.')
+    }
 
-        if (!suppressionCheck.allowed) {
-          suppressed += 1
-          await supabase
-            .from('campaign_enrollments')
-            .update({
-              review_state: 'approved',
-              delivery_status: 'suppressed',
-              latest_channel: 'email',
-            })
-            .eq('id', enrollmentId)
-          continue
-        }
+    const { data: contactRuns, error: contactRunsError } = await supabase
+      .from('campaign_contact_runs')
+      .insert(contactRunRows)
+      .select('id, campaign_enrollment_id')
 
-        const html = message.includes('<html') ? message : baseEmailTemplate(message)
-        const emailResult = await sendEmailFrom(actor.full_name || actor.email || 'NextGen Realty', {
-          to: destination,
-          subject,
-          html,
-          ...(actor.email ? { replyTo: actor.email } : {}),
-        })
+    if (contactRunsError || !contactRuns) {
+      return Errors.internal(contactRunsError?.message || 'Failed to create contact runs.')
+    }
 
-        if (!emailResult.success) {
-          failed += 1
-          await supabase
-            .from('campaign_enrollments')
-            .update({
-              review_state: 'approved',
-              delivery_status: 'failed',
-              latest_channel: 'email',
-            })
-            .eq('id', enrollmentId)
-          continue
-        }
+    const mappedEntryStepId = stepIdMap.get(entryNode.id)
+    if (!mappedEntryStepId) {
+      return Errors.internal('Failed to resolve launch entry step id.')
+    }
 
-        const logResult = await recordOutboundEmailCommunication({
-          userId: user.id,
-          propertyId,
-          to: destination,
-          subject,
-          content: html,
-          status: 'sent',
-          supabase,
-        })
+    for (const contactRun of contactRuns) {
+      const idempotencyKey = [versionId, contactRun.id, mappedEntryStepId, 'launch'].join(':')
+      const { error: enqueueError } = await supabase.rpc('enqueue_campaign_step_run', {
+        p_campaign_id: campaign.id,
+        p_workflow_version_id: versionId,
+        p_campaign_contact_run_id: contactRun.id,
+        p_campaign_step_id: mappedEntryStepId,
+        p_step_order: entryNode.sequence,
+        p_node_kind: entryNode.kind,
+        p_lane_key: entryNode.laneKey,
+        p_scheduled_for: now,
+        p_idempotency_key: idempotencyKey,
+        p_input_payload: {
+          source: 'launch',
+          campaign_enrollment_id: contactRun.campaign_enrollment_id,
+        },
+        p_output_payload: {},
+        p_status: 'queued',
+        p_provider_reference: null,
+        p_next_step_order: null,
+      })
 
-        sent += 1
-        await supabase
-          .from('campaign_enrollments')
-          .update({
-            review_state: 'approved',
-            delivery_status: 'sent',
-            latest_channel: 'email',
-            last_communication_id: logResult.success ? logResult.data?.id || null : null,
-          })
-          .eq('id', enrollmentId)
-
-        continue
-      }
-
-      const destination = pickContactPhone(contact) || pickPropertyPhone(property)
-      const canSendVoice =
-        Boolean(destination) &&
-        Boolean(voiceAssignment?.phone_number) &&
-        isHttpUrl(voicemailUrl)
-
-      if (!destination) {
-        failed += 1
-        await supabase
-          .from('campaign_enrollments')
-          .update({
-            review_state: 'approved',
-            delivery_status: 'failed',
-            latest_channel: 'voice',
-          })
-          .eq('id', enrollmentId)
-        continue
-      }
-
-      if (!canSendVoice) {
-        queued += 1
-        await supabase
-          .from('campaign_enrollments')
-          .update({
-            review_state: 'approved',
-            delivery_status: 'queued',
-            latest_channel: 'voice',
-          })
-          .eq('id', enrollmentId)
-        continue
-      }
-
-      try {
-        const outboundUrl = new URL('/api/voice/outbound', request.url)
-        outboundUrl.searchParams.set('Mode', 'voicemail')
-        outboundUrl.searchParams.set('VoicemailUrl', voicemailUrl as string)
-
-        const statusCallbackUrl = new URL('/api/voice/webhook', request.url)
-        statusCallbackUrl.searchParams.set('CampaignId', campaign.id)
-        statusCallbackUrl.searchParams.set('PropertyId', propertyId)
-        if (contactId) {
-          statusCallbackUrl.searchParams.set('ContactId', contactId)
-        }
-        statusCallbackUrl.searchParams.set('Mode', 'voicemail')
-        statusCallbackUrl.searchParams.set('VoicemailUrl', voicemailUrl as string)
-
-        const call = await getSignalWireClient().calls.create({
-          to: destination,
-          from: voiceAssignment?.phone_number as string,
-          url: outboundUrl.toString(),
-          method: 'POST',
-          statusCallback: statusCallbackUrl.toString(),
-          statusCallbackMethod: 'POST',
-        })
-
-        const { data: callRow } = await supabase
-          .from('calls')
-          .insert({
-            caller_id: user.id,
-            user_phone_number_id: voiceAssignment?.id || null,
-            contact_id: contactId,
-            property_id: propertyId,
-            from_number: voiceAssignment?.phone_number || null,
-            to_number: destination,
-            status: 'queued',
-            notes: `Marketing voicemail: ${campaign.name}`,
-            twilio_call_sid: (call as { sid?: string }).sid || null,
-          })
-          .select('id')
-          .maybeSingle()
-
-        queued += 1
-        await supabase
-          .from('campaign_enrollments')
-          .update({
-            review_state: 'approved',
-            delivery_status: 'queued',
-            latest_channel: 'voice',
-            last_communication_id: callRow?.id || null,
-          })
-          .eq('id', enrollmentId)
-      } catch (error) {
-        console.error('Voice launch error:', error)
-        failed += 1
-        await supabase
-          .from('campaign_enrollments')
-          .update({
-            review_state: 'approved',
-            delivery_status: 'failed',
-            latest_channel: 'voice',
-          })
-          .eq('id', enrollmentId)
+      if (enqueueError) {
+        return Errors.internal(enqueueError.message)
       }
     }
 
-    const finalStatus =
-      failed > 0 && sent + queued > 0
-        ? 'partially_failed'
-        : failed > 0
-          ? 'failed'
-          : 'active'
+    const queued = contactRuns.length
+    const suppressed = refreshed.enrollments.filter(
+      (enrollment) => (enrollment as { eligibility_status?: string }).eligibility_status === 'suppressed'
+    ).length
+    const skipped = refreshed.enrollments.length - queued - suppressed
 
-    await supabase
+    const { error: campaignUpdateError } = await supabase
       .from('campaigns')
       .update({
-        status: finalStatus,
-        launch_state: queued > 0 && sent === 0 ? 'queued' : finalStatus,
-        updated_at: new Date().toISOString(),
+        channel: deriveWorkflowSummaryChannel(draft.nodes),
+        review_state: 'approved',
+        status: 'active',
+        launch_state: 'queued',
+        launched_at: campaign.launched_at || now,
+        updated_at: now,
       })
       .eq('id', campaign.id)
       .eq('owner_user_id', user.id)
 
+    if (campaignUpdateError) {
+      return Errors.internal(campaignUpdateError.message)
+    }
+
     return apiSuccess({
       campaignId: campaign.id,
-      launchState: queued > 0 && sent === 0 ? 'queued' : finalStatus,
+      workflowVersionId: versionId,
+      launchState: 'queued',
       queued,
-      sent,
-      failed,
+      sent: 0,
+      failed: 0,
       suppressed,
       skipped,
     })

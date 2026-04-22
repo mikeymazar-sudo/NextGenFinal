@@ -4,38 +4,12 @@ import { withAuth } from '@/lib/auth/middleware'
 import { apiSuccess, Errors } from '@/lib/api/response'
 import { createAdminClient } from '@/lib/supabase/server'
 import { resolveMarketingActor } from '@/lib/marketing/actor'
+import {
+    consentMetadataFromFields,
+    normalizeContactRecord,
+    normalizeDestinationEntries,
+} from '@/lib/marketing/destination-consent'
 import { requireContactOwnership } from '@/lib/marketing/ownership'
-
-interface PhoneEntry {
-    value: string
-    label: string
-    is_primary: boolean
-}
-
-interface EmailEntry {
-    value: string
-    label: string
-    is_primary: boolean
-}
-
-// Normalize old string[] format to PhoneEntry[]/EmailEntry[] objects
-function normalizePhones(raw: (string | PhoneEntry)[]): PhoneEntry[] {
-    return (raw || []).map((p, i) => {
-        if (typeof p === 'string') {
-            return { value: p, label: 'mobile', is_primary: i === 0 }
-        }
-        return { value: p.value || '', label: p.label || 'mobile', is_primary: !!p.is_primary }
-    })
-}
-
-function normalizeEmails(raw: (string | EmailEntry)[]): EmailEntry[] {
-    return (raw || []).map((e, i) => {
-        if (typeof e === 'string') {
-            return { value: e, label: 'personal', is_primary: i === 0 }
-        }
-        return { value: e.value || '', label: e.label || 'personal', is_primary: !!e.is_primary }
-    })
-}
 
 const UpdateContactSchema = z.object({
     type: z.enum(['phone', 'email']),
@@ -43,6 +17,10 @@ const UpdateContactSchema = z.object({
     value: z.string().optional(),
     label: z.string().optional(),
     is_primary: z.boolean().optional(),
+    consent_status: z.string().optional(),
+    consent_source: z.string().optional(),
+    consent_updated_at: z.string().nullable().optional(),
+    consent_note: z.string().nullable().optional(),
 })
 
 export const PATCH = withAuth(async (
@@ -58,7 +36,17 @@ export const PATCH = withAuth(async (
             return Errors.badRequest('Missing required fields: type, index')
         }
 
-        const { type, index, value, label, is_primary } = parsed.data
+        const {
+            type,
+            index,
+            value,
+            label,
+            is_primary,
+            consent_status,
+            consent_source,
+            consent_updated_at,
+            consent_note,
+        } = parsed.data
         const supabase = createAdminClient()
         const actor = await resolveMarketingActor(user.id, { supabase, email: user.email })
 
@@ -83,9 +71,29 @@ export const PATCH = withAuth(async (
         }
 
         const updateData: Record<string, unknown> = {}
+        const now = new Date().toISOString()
+        const consentPatchProvided =
+            consent_status !== undefined ||
+            consent_source !== undefined ||
+            consent_updated_at !== undefined ||
+            consent_note !== undefined
+        const consentPatch = consentPatchProvided
+            ? consentMetadataFromFields(
+                  {
+                      consent_status,
+                      consent_source,
+                      consent_updated_at,
+                      consent_note,
+                  },
+                  'manual',
+                  now
+              )
+            : null
 
         if (type === 'phone') {
-            const phones: PhoneEntry[] = normalizePhones(contact.phone_numbers || [])
+            const phones = normalizeDestinationEntries(contact.phone_numbers || [], 'sms', {
+                defaultConsentSource: 'legacy',
+            })
             if (index < 0 || index >= phones.length) {
                 return Errors.badRequest('Invalid index')
             }
@@ -100,10 +108,13 @@ export const PATCH = withAuth(async (
                 ...(value !== undefined && { value }),
                 ...(label !== undefined && { label }),
                 ...(is_primary !== undefined && { is_primary }),
+                ...(consentPatch || {}),
             }
             updateData.phone_numbers = phones
         } else {
-            const emails: EmailEntry[] = normalizeEmails(contact.emails || [])
+            const emails = normalizeDestinationEntries(contact.emails || [], 'email', {
+                defaultConsentSource: 'legacy',
+            })
             if (index < 0 || index >= emails.length) {
                 return Errors.badRequest('Invalid index')
             }
@@ -118,6 +129,7 @@ export const PATCH = withAuth(async (
                 ...(value !== undefined && { value }),
                 ...(label !== undefined && { label }),
                 ...(is_primary !== undefined && { is_primary }),
+                ...(consentPatch || {}),
             }
             updateData.emails = emails
         }
@@ -134,7 +146,7 @@ export const PATCH = withAuth(async (
             return Errors.internal(updateError.message)
         }
 
-        return apiSuccess(updated)
+        return apiSuccess(normalizeContactRecord(updated))
     } catch (error) {
         console.error('Update contact error:', error)
         return Errors.internal()
@@ -181,7 +193,9 @@ export const DELETE = withAuth(async (
         const updateData: Record<string, unknown> = {}
 
         if (type === 'phone') {
-            const phones: PhoneEntry[] = normalizePhones(contact.phone_numbers || [])
+            const phones = normalizeDestinationEntries(contact.phone_numbers || [], 'sms', {
+                defaultConsentSource: 'legacy',
+            })
             if (index >= phones.length) {
                 return Errors.badRequest('Invalid index')
             }
@@ -196,7 +210,9 @@ export const DELETE = withAuth(async (
 
             updateData.phone_numbers = phones
         } else {
-            const emails: EmailEntry[] = normalizeEmails(contact.emails || [])
+            const emails = normalizeDestinationEntries(contact.emails || [], 'email', {
+                defaultConsentSource: 'legacy',
+            })
             if (index >= emails.length) {
                 return Errors.badRequest('Invalid index')
             }
@@ -224,7 +240,7 @@ export const DELETE = withAuth(async (
             return Errors.internal(updateError.message)
         }
 
-        return apiSuccess(updated)
+        return apiSuccess(normalizeContactRecord(updated))
     } catch (error) {
         console.error('Delete contact error:', error)
         return Errors.internal()

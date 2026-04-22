@@ -1,0 +1,4 @@
+interface:
+  display_name: "Marketing Provider Webhooks"
+  short_description: "Maintain SignalWire and Resend webhook contracts for marketing flows"
+  default_prompt: "Use $marketing-provider-webhooks to implement or audit SignalWire and Resend marketing webhooks, reply threading, suppression updates, and stop-rule behavior."
